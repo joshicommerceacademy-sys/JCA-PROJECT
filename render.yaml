@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: joshi-commerce-academy
+    runtime: node
+    plan: free
+    buildCommand: npm run build && npm run migrate
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM_NAME
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: MAIL_SEND_DELAY_MS
+        value: "1500"
+      - key: REMINDER_CRON
+        value: "0 8 * * *"
