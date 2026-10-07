@@ -34,8 +34,8 @@ const emptyQuestionForm = {
 
 export default function Questions() {
   const queryClient = useQueryClient()
-  const { data: banks, isLoading: banksLoading } = useQuery({ queryKey: ["question-banks"], queryFn: adminApi.questionBanks.list })
-  const { data: standards } = useQuery({ queryKey: ["standards"], queryFn: adminApi.standards.list })
+  const { data: banks, isLoading: banksLoading } = useQuery({ queryKey: ["question-banks"], queryFn: () => adminApi.questionBanks.list() })
+  const { data: standards } = useQuery({ queryKey: ["standards"], queryFn: () => adminApi.standards.list() })
   const [search, setSearch] = React.useState("")
   const [difficultyFilter, setDifficultyFilter] = React.useState("all")
   const { data: questions, isLoading: questionsLoading } = useQuery({

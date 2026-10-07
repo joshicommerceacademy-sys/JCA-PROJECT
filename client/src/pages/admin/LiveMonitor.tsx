@@ -6,7 +6,7 @@ import {
 } from "lucide-react"
 import { adminApi } from "@/api/adminApi"
 import { getErrorMessage } from "@/api/client"
-import type { MonitorCandidate, Exam } from "@/api/types"
+import type { AppSettings, Exam, MonitorCandidate, MonitorData } from "@/api/types"
 import { getLiveWindowState, type LiveWindowState } from "@/lib/examWindow"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -76,8 +76,14 @@ function SortButton({
 
 export default function LiveMonitor() {
   const queryClient = useQueryClient()
-  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: adminApi.exams.list })
-  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: adminApi.settings.get })
+  const { data: exams } = useQuery<Exam[]>({
+    queryKey: ["exams"],
+    queryFn: () => adminApi.exams.list(),
+  })
+  const { data: settings } = useQuery<AppSettings>({
+    queryKey: ["settings"],
+    queryFn: () => adminApi.settings.get(),
+  })
   const showIpColumn = !!settings?.ip_capture_enabled
   const [examId, setExamId] = React.useState<string>("")
   const [now, setNow] = React.useState(() => Date.now())
@@ -106,7 +112,7 @@ export default function LiveMonitor() {
     setExamId(String(sortedExams[0].id))
   }, [sortedExams, examId])
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading } = useQuery<MonitorData>({
     queryKey: ["monitor", examId],
     queryFn: () => adminApi.monitor.get(examId),
     enabled: !!examId,

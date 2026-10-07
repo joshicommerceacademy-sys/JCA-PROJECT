@@ -18,7 +18,7 @@ import {
 
 export default function Attendance() {
   const queryClient = useQueryClient()
-  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: adminApi.exams.list })
+  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: () => adminApi.exams.list() })
   const [examId, setExamId] = React.useState<string>("")
   const [selected, setSelected] = React.useState<number[]>([])
 

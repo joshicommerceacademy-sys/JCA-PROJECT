@@ -32,7 +32,7 @@ const UNASSIGNED = "Unassigned"
 export default function Students() {
   const queryClient = useQueryClient()
   const { data: students, isLoading } = useQuery({ queryKey: ["students"], queryFn: () => adminApi.students.list() })
-  const { data: centres } = useQuery({ queryKey: ["centres"], queryFn: adminApi.centres.list })
+  const { data: centres } = useQuery({ queryKey: ["centres"], queryFn: () => adminApi.centres.list() })
 
   const [search, setSearch] = React.useState("")
   const [open, setOpen] = React.useState(false)

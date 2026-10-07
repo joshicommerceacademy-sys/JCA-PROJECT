@@ -31,7 +31,7 @@ export default function StudentLogin() {
 
   const { data: exams, isLoading: examsLoading } = useQuery({
     queryKey: ["login-exams"],
-    queryFn: studentApi.loginExams,
+    queryFn: () => studentApi.loginExams(),
     refetchInterval: 30000,
   })
 

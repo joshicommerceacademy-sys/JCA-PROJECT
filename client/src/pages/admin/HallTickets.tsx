@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Ticket, Mail, Send } from "lucide-react"
 import { adminApi } from "@/api/adminApi"
 import { getErrorMessage } from "@/api/client"
+import type { Exam, HallTicket } from "@/api/types"
 import { ConfirmPasswordDialog } from "@/components/ConfirmPasswordDialog"
 import { formatDate } from "@/lib/formatDate"
 import { Button } from "@/components/ui/button"
@@ -77,13 +78,16 @@ function SeatCell({ ticketId, seatNumber }: { ticketId: number; seatNumber: stri
 export default function HallTickets() {
   const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
-  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: adminApi.exams.list })
+  const { data: exams } = useQuery<Exam[]>({
+    queryKey: ["exams"],
+    queryFn: () => adminApi.exams.list(),
+  })
   const [examId, setExamId] = React.useState<string>(searchParams.get("examId") || "all")
   const [selected, setSelected] = React.useState<number[]>([])
   const [failedSends, setFailedSends] = React.useState<FailedSend[]>([])
   const [confirmTarget, setConfirmTarget] = React.useState<{ type: "single"; id: number } | { type: "bulk"; ids: number[] } | null>(null)
 
-  const { data: tickets, isLoading } = useQuery({
+  const { data: tickets, isLoading } = useQuery<HallTicket[]>({
     queryKey: ["hall-tickets", { examId }],
     queryFn: () => adminApi.hallTickets.list(examId !== "all" ? { examId } : undefined),
   })

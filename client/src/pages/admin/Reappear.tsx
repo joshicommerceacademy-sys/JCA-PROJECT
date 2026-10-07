@@ -5,7 +5,7 @@ import { RotateCcw, Trash2, Link2 } from "lucide-react"
 import { adminApi } from "@/api/adminApi"
 import { getErrorMessage } from "@/api/client"
 import { formatDateTime } from "@/lib/formatDate"
-import type { ReappearEligibleCandidate } from "@/api/types"
+import type { Exam, ReappearEligibleCandidate, ReappearRequest } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
@@ -23,7 +23,10 @@ import {
 
 export default function Reappear() {
   const queryClient = useQueryClient()
-  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: adminApi.exams.list })
+  const { data: exams } = useQuery<Exam[]>({
+    queryKey: ["exams"],
+    queryFn: () => adminApi.exams.list(),
+  })
   const [examId, setExamId] = React.useState<string>("")
   const [granting, setGranting] = React.useState<ReappearEligibleCandidate | null>(null)
   const [reason, setReason] = React.useState("")
@@ -32,14 +35,14 @@ export default function Reappear() {
     if (!examId && exams && exams.length > 0) setExamId(String(exams[0].id))
   }, [exams, examId])
 
-  const { data: eligible, isLoading: eligibleLoading } = useQuery({
+  const { data: eligible, isLoading: eligibleLoading } = useQuery<ReappearEligibleCandidate[]>({
     queryKey: ["reappear-eligible", { examId }],
     queryFn: () => adminApi.reappear.eligible(examId),
     enabled: !!examId,
     refetchInterval: 15000,
   })
 
-  const { data: requests, isLoading: requestsLoading } = useQuery({
+  const { data: requests, isLoading: requestsLoading } = useQuery<ReappearRequest[]>({
     queryKey: ["reappear", { examId }],
     queryFn: () => adminApi.reappear.list(examId ? { examId } : undefined),
     enabled: !!examId,

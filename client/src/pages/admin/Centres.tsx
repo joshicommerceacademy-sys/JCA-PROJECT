@@ -25,7 +25,7 @@ const emptyForm = { id: 0, name: "", code: "", address: "", city: "", status: "a
 
 export default function Centres() {
   const queryClient = useQueryClient()
-  const { data: centres, isLoading } = useQuery({ queryKey: ["centres"], queryFn: adminApi.centres.list })
+  const { data: centres, isLoading } = useQuery({ queryKey: ["centres"], queryFn: () => adminApi.centres.list() })
   const [search, setSearch] = React.useState("")
   const [open, setOpen] = React.useState(false)
   const [form, setForm] = React.useState(emptyForm)

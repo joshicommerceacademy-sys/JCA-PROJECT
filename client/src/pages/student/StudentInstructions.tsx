@@ -31,7 +31,7 @@ const INSTRUCTIONS = [
 export default function StudentInstructions() {
   useDisableCopy()
   const navigate = useNavigate()
-  const { data, isLoading, error } = useQuery({ queryKey: ["student-instructions"], queryFn: studentApi.instructions })
+  const { data, isLoading, error } = useQuery({ queryKey: ["student-instructions"], queryFn: () => studentApi.instructions() })
   const [agreed, setAgreed] = React.useState(false)
 
   function handleContinue() {

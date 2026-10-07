@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 export default function StudentResult() {
   const navigate = useNavigate()
   const { logout } = useStudentAuth()
-  const { data, isLoading } = useQuery({ queryKey: ["student-result"], queryFn: studentApi.getResult })
+  const { data, isLoading } = useQuery({ queryKey: ["student-result"], queryFn: () => studentApi.getResult() })
   const [showSubjects, setShowSubjects] = React.useState(false)
 
   function handleBackToLogin() {

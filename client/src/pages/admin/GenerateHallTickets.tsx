@@ -24,8 +24,8 @@ export default function GenerateHallTickets() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { data: students, isLoading } = useQuery({ queryKey: ["students"], queryFn: () => adminApi.students.list() })
-  const { data: standards } = useQuery({ queryKey: ["standards"], queryFn: adminApi.standards.list })
-  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: adminApi.exams.list })
+  const { data: standards } = useQuery({ queryKey: ["standards"], queryFn: () => adminApi.standards.list() })
+  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: () => adminApi.exams.list() })
 
   const [search, setSearch] = React.useState("")
   const [selected, setSelected] = React.useState<number[]>([])

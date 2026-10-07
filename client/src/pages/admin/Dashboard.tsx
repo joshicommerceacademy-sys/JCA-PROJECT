@@ -17,7 +17,7 @@ const statCards = [
 ] as const
 
 export default function Dashboard() {
-  const { data, isLoading } = useQuery({ queryKey: ["dashboard-stats"], queryFn: adminApi.dashboardStats })
+  const { data, isLoading } = useQuery({ queryKey: ["dashboard-stats"], queryFn: () => adminApi.dashboardStats() })
   const [now, setNow] = React.useState(new Date())
 
   React.useEffect(() => {

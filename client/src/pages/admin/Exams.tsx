@@ -38,11 +38,11 @@ const statusVariant = {
 
 export default function Exams() {
   const queryClient = useQueryClient()
-  const { data: exams, isLoading } = useQuery({ queryKey: ["exams"], queryFn: adminApi.exams.list })
-  const { data: standards } = useQuery({ queryKey: ["standards"], queryFn: adminApi.standards.list })
-  const { data: centres } = useQuery({ queryKey: ["centres"], queryFn: adminApi.centres.list })
-  const { data: banks } = useQuery({ queryKey: ["question-banks"], queryFn: adminApi.questionBanks.list })
-  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: adminApi.settings.get })
+  const { data: exams, isLoading } = useQuery({ queryKey: ["exams"], queryFn: () => adminApi.exams.list() })
+  const { data: standards } = useQuery({ queryKey: ["standards"], queryFn: () => adminApi.standards.list() })
+  const { data: centres } = useQuery({ queryKey: ["centres"], queryFn: () => adminApi.centres.list() })
+  const { data: banks } = useQuery({ queryKey: ["question-banks"], queryFn: () => adminApi.questionBanks.list() })
+  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: () => adminApi.settings.get() })
   const [open, setOpen] = React.useState(false)
   const [form, setForm] = React.useState(emptyForm)
   const [sections, setSections] = React.useState<SectionForm[]>([emptySection])

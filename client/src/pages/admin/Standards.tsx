@@ -25,7 +25,7 @@ const emptyForm = { id: 0, name: "", code: "", description: "", status: "active"
 
 export default function Standards() {
   const queryClient = useQueryClient()
-  const { data: standards, isLoading } = useQuery({ queryKey: ["standards"], queryFn: adminApi.standards.list })
+  const { data: standards, isLoading } = useQuery({ queryKey: ["standards"], queryFn: () => adminApi.standards.list() })
   const [search, setSearch] = React.useState("")
   const [open, setOpen] = React.useState(false)
   const [form, setForm] = React.useState(emptyForm)

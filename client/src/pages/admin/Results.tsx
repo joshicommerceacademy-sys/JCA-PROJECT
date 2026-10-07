@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { Trash2, Eye, Search, Trophy, FileDown, Mail } from "lucide-react"
 import { adminApi } from "@/api/adminApi"
 import { getErrorMessage } from "@/api/client"
-import type { ExamResult } from "@/api/types"
+import type { Exam, ExamResult } from "@/api/types"
 import { ConfirmPasswordDialog } from "@/components/ConfirmPasswordDialog"
 import { formatDate, formatDateTime } from "@/lib/formatDate"
 import { Button } from "@/components/ui/button"
@@ -22,7 +22,10 @@ import {
 
 export default function Results() {
   const queryClient = useQueryClient()
-  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: adminApi.exams.list })
+  const { data: exams } = useQuery<Exam[]>({
+    queryKey: ["exams"],
+    queryFn: () => adminApi.exams.list(),
+  })
   const [examId, setExamId] = React.useState<string>("all")
   const [resultStatus, setResultStatus] = React.useState<string>("all")
   const [search, setSearch] = React.useState("")
@@ -30,7 +33,7 @@ export default function Results() {
   const [selected, setSelected] = React.useState<number[]>([])
   const [confirmTarget, setConfirmTarget] = React.useState<{ type: "single"; id: number } | { type: "bulk"; ids: number[] } | null>(null)
 
-  const { data: results, isLoading } = useQuery({
+  const { data: results, isLoading } = useQuery<ExamResult[]>({
     queryKey: ["results", { examId, resultStatus, search }],
     queryFn: () =>
       adminApi.results.list({
@@ -42,7 +45,7 @@ export default function Results() {
 
   // The list rows don't carry the per-subject breakdown (it'd mean computing it for every
   // row just to view one) — fetched on demand when the detail dialog opens instead.
-  const { data: viewingDetail, isLoading: viewingDetailLoading } = useQuery({
+  const { data: viewingDetail, isLoading: viewingDetailLoading } = useQuery<ExamResult & { answers: unknown[] }>({
     queryKey: ["result-detail", viewing?.id],
     queryFn: () => adminApi.results.get(viewing!.id),
     enabled: !!viewing,

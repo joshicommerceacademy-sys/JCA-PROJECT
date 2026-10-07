@@ -20,7 +20,7 @@ import jcaBadge from "@/assets/jca-badge.png"
 export default function StudentExamSummary() {
   useDisableCopy()
   const navigate = useNavigate()
-  const { data, isLoading, error } = useQuery({ queryKey: ["student-instructions"], queryFn: studentApi.instructions })
+  const { data, isLoading, error } = useQuery({ queryKey: ["student-instructions"], queryFn: () => studentApi.instructions() })
   const [starting, setStarting] = React.useState(false)
   const [earlyError, setEarlyError] = React.useState<string | null>(null)
 

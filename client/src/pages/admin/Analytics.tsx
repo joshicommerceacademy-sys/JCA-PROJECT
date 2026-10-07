@@ -29,7 +29,7 @@ function difficultyVariant(d: string) {
 }
 
 export default function Analytics() {
-  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: adminApi.exams.list })
+  const { data: exams } = useQuery({ queryKey: ["exams"], queryFn: () => adminApi.exams.list() })
   const [examId, setExamId] = React.useState<string>("")
 
   React.useEffect(() => {
@@ -44,7 +44,7 @@ export default function Analytics() {
 
   const { data: batches, isLoading: batchesLoading } = useQuery({
     queryKey: ["analytics-batches"],
-    queryFn: adminApi.analytics.batches,
+    queryFn: () => adminApi.analytics.batches(),
   })
 
   const summary = examAnalytics?.summary

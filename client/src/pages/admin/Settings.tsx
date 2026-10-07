@@ -1,9 +1,10 @@
 import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Settings as SettingsIcon, Hash, Wifi, Mail, KeyRound, Ban } from "lucide-react"
+import { Settings as SettingsIcon, Hash, Mail, KeyRound, Ban } from "lucide-react"
 import { adminApi } from "@/api/adminApi"
 import { getErrorMessage } from "@/api/client"
+import type { AppSettings } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -33,7 +34,10 @@ function ToggleRow({
 
 export default function Settings() {
   const queryClient = useQueryClient()
-  const { data: settings, isLoading } = useQuery({ queryKey: ["settings"], queryFn: adminApi.settings.get })
+  const { data: settings, isLoading } = useQuery<AppSettings>({
+    queryKey: ["settings"],
+    queryFn: () => adminApi.settings.get(),
+  })
 
   const updateMutation = useMutation({
     mutationFn: adminApi.settings.update,
