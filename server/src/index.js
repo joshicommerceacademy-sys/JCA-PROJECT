@@ -48,18 +48,24 @@ app.use("/api/admin/reappear", require("./routes/reappear"));
 app.use("/api/admin/settings", require("./routes/settings"));
 app.use("/api/student", require("./routes/studentExam"));
 
-// In production Render runs a single Web Service. Serve the compiled React app
-// from client/dist while keeping /api/* and /uploads/* on the Express server.
-const clientDist = path.join(__dirname, "..", "..", "client", "dist");
-if (process.env.NODE_ENV === "production" && fs.existsSync(clientDist)) {
-    app.use(express.static(clientDist));
+// Render runs the API and compiled React app from the same Web Service.
+// Always try to serve client/dist when it exists (not only when NODE_ENV is set),
+// so the root URL works even if Render's environment configuration is incomplete.
+const clientDist = path.resolve(__dirname, "..", "..", "client", "dist");
+const clientIndex = path.join(clientDist, "index.html");
+const hasClientBuild = fs.existsSync(clientIndex);
+
+console.log(`[WEB] React build: ${hasClientBuild ? clientDist : "NOT FOUND"}`);
+
+if (hasClientBuild) {
+    app.use(express.static(clientDist, { index: "index.html" }));
 
     // React Router needs the SPA entry point for direct navigation to client routes.
     app.get("*", (req, res, next) => {
         if (req.path.startsWith("/api/") || req.path.startsWith("/uploads/")) {
             return next();
         }
-        return res.sendFile(path.join(clientDist, "index.html"));
+        return res.sendFile(clientIndex);
     });
 }
 
