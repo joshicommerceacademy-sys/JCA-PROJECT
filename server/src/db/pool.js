@@ -1,5 +1,9 @@
-const { Pool } = require("pg");
+const { Pool, types } = require("pg");
 require("dotenv").config();
+
+// PostgreSQL DATE values are calendar dates, not moments in time. Keep them as
+// YYYY-MM-DD strings so exam dates never shift because of timezone conversion.
+types.setTypeParser(1082, (value) => value);
 
 if (!process.env.DATABASE_URL) {
     console.warn(

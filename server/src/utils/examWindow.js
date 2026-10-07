@@ -1,25 +1,37 @@
 const LOGIN_OPENS_MINUTES_BEFORE = 30;
 const LATE_LOGIN_GRACE_MINUTES = 25;
+const INDIA_OFFSET = "+05:30";
+
+function datePart(value) {
+    if (typeof value === "string") return value.slice(0, 10);
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    return String(value).slice(0, 10);
+}
+
+function timePart(value) {
+    const text = String(value || "00:00:00");
+    return text.length >= 8 ? text.slice(0, 8) : `${text}:00`.slice(0, 8);
+}
+
+// All exam schedule dates/times are India Standard Time (Asia/Kolkata), regardless
+// of the Render server timezone or the candidate browser timezone.
+function getScheduledStart(exam) {
+    return new Date(`${datePart(exam.exam_date)}T${timePart(exam.start_time)}${INDIA_OFFSET}`);
+}
 
 function getExamWindow(exam) {
-    // node-postgres parses a DATE column using the *local* Date constructor (new Date(y, m, d)),
-    // so the resulting Date object already represents local midnight of the intended calendar
-    // date — reading it back with the local getters (not the UTC ones, and not toISOString(),
-    // which would shift the date in non-zero UTC-offset timezones) gives the correct date.
-    const d = exam.exam_date;
-    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const start = new Date(`${dateStr}T${exam.start_time}`);
+    const start = getScheduledStart(exam);
     const loginWindowMinutes = exam.login_window_minutes ?? LOGIN_OPENS_MINUTES_BEFORE;
     const gracePeriodMinutes = exam.grace_period_minutes ?? LATE_LOGIN_GRACE_MINUTES;
     let loginStart = new Date(start.getTime() - loginWindowMinutes * 60000);
-    // The admin's "Start Exam" click (started_at) is a deliberate, real-time "go" signal —
-    // if it happens earlier than the pre-configured login window would have opened, that
-    // signal wins: the exam becomes loginable immediately rather than students (and the
-    // exam-selection list) waiting on a schedule the admin has already overridden in person.
+
+    // An explicit admin Start Exam click can open login early, but it is no longer
+    // required for a normally scheduled exam to become available.
     if (exam.started_at) {
         const startedAt = new Date(exam.started_at);
         if (startedAt < loginStart) loginStart = startedAt;
     }
+
     const graceEnd = new Date(start.getTime() + gracePeriodMinutes * 60000);
     const examEnd = new Date(start.getTime() + exam.duration_minutes * 60000);
     return { start, loginStart, graceEnd, examEnd };
@@ -28,7 +40,7 @@ function getExamWindow(exam) {
 function canLoginNow(exam, now = new Date()) {
     const { loginStart, graceEnd, examEnd } = getExamWindow(exam);
     if (now < loginStart) {
-        return { ok: false, reason: `Login opens at ${loginStart.toLocaleString()}.` };
+        return { ok: false, reason: `Login opens at ${loginStart.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}.` };
     }
     if (now > graceEnd) {
         return { ok: false, reason: "The grace period for logging in to this exam has ended." };
@@ -39,10 +51,6 @@ function canLoginNow(exam, now = new Date()) {
     return { ok: true };
 }
 
-// How long past the exam's scheduled end time it should stay pickable on the student login
-// page — wider than the login/grace window above, deliberately: a candidate who was logged in
-// (fresh or resuming an interrupted attempt) can still find their exam in the list and log back
-// in during this buffer, instead of it vanishing the moment the tighter grace period closes.
 const SELECTABLE_AFTER_END_MINUTES = 30;
 
 function isSelectableForLogin(exam, now = new Date()) {
@@ -51,4 +59,4 @@ function isSelectableForLogin(exam, now = new Date()) {
     return now >= loginStart && now <= selectableUntil;
 }
 
-module.exports = { getExamWindow, canLoginNow, isSelectableForLogin };
+module.exports = { getExamWindow, canLoginNow, isSelectableForLogin, getScheduledStart };

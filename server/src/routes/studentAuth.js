@@ -51,7 +51,7 @@ router.get(
              LEFT JOIN exam_attempts ea ON ea.student_id = st.id AND ea.exam_id = e.id
              LEFT JOIN reappear_requests rr ON rr.student_id = st.id AND rr.exam_id = e.id AND rr.status = 'pending'
              WHERE st.status = 'allowed'
-                   AND e.status != 'cancelled' AND e.started_at IS NOT NULL
+                   AND e.status != 'cancelled'
                    AND (ea.id IS NULL OR ea.status != 'submitted')
                    ${examClause}`,
             params
@@ -87,7 +87,7 @@ router.get(
             LEFT JOIN reappear_requests rr ON rr.student_id = st.id AND rr.exam_id = e.id AND rr.status = 'pending'
             LEFT JOIN centres c ON c.id = e.centre_id
             WHERE st.status = 'allowed'
-                  AND e.status != 'cancelled' AND e.started_at IS NOT NULL
+                  AND e.status != 'cancelled'
                   AND (ea.id IS NULL OR ea.status != 'submitted')
         `);
 
@@ -126,9 +126,16 @@ router.post(
 
         const [exam] = await query("SELECT started_at, access_password FROM exams WHERE id = $1", [examId]);
         if (!exam) throw new ApiError(404, "Exam not found.");
-        if (!exam.started_at) {
-            throw new ApiError(403, "This exam has not been started by the admin yet.");
+        if (!exam.access_password) {
+            const generated = String(require('crypto').randomInt(100000, 1000000));
+            const [updated] = await query(
+                "UPDATE exams SET access_password = $1, updated_at = now() WHERE id = $2 RETURNING access_password",
+                [generated, examId]
+            );
+            exam.access_password = updated.access_password;
         }
+        const windowCheck = canLoginNow(exam);
+        if (!windowCheck.ok) throw new ApiError(403, windowCheck.reason);
         if (password !== exam.access_password) {
             throw new ApiError(401, "Incorrect exam password.");
         }
@@ -149,9 +156,16 @@ router.get(
 
         const [exam] = await query("SELECT started_at, access_password FROM exams WHERE id = $1", [examId]);
         if (!exam) throw new ApiError(404, "Exam not found.");
-        if (!exam.started_at) {
-            throw new ApiError(403, "This exam has not been started by the admin yet.");
+        if (!exam.access_password) {
+            const generated = String(require('crypto').randomInt(100000, 1000000));
+            const [updated] = await query(
+                "UPDATE exams SET access_password = $1, updated_at = now() WHERE id = $2 RETURNING access_password",
+                [generated, examId]
+            );
+            exam.access_password = updated.access_password;
         }
+        const windowCheck = canLoginNow(exam);
+        if (!windowCheck.ok) throw new ApiError(403, windowCheck.reason);
 
         res.json({ status: "success", data: { accessPassword: exam.access_password } });
     })

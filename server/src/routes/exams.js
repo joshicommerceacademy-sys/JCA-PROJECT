@@ -164,14 +164,15 @@ router.post(
                 `INSERT INTO exams
                     (name, standard_id, centre_id, exam_date, start_time, duration_minutes,
                      question_count, passing_percentage, notes, login_window_minutes, grace_period_minutes,
-                     show_provisional_result, compensate_late_login, negative_marking, seat_number_required)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
+                     show_provisional_result, compensate_late_login, negative_marking, seat_number_required, access_password)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
                 [
                     name, standardId, centreId, examDate, startTime, durationMinutes,
                     totalQuestionCount, passingPercentage || 40, notes || null,
                     loginWindowMinutes || 30, gracePeriodMinutes || 25,
                     showProvisionalResult !== false, compensateLateLogin !== false,
                     negativeMarking === true, effectiveSeatNumberRequired,
+                    String(crypto.randomInt(100000, 1000000)),
                 ]
             );
             const exam = examResult.rows[0];
