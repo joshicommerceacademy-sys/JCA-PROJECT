@@ -148,10 +148,16 @@ router.post(
             }
         }
 
+        // Hall-ticket generation only creates the tickets.
+        // Emailing is intentionally manual from the Hall Tickets page so the admin can
+        // choose exactly which students should receive their PDF.
         res.status(201).json({
             status: "success",
             message: `Generated ${created.length} hall ticket(s), skipped ${skipped.length}.`,
-            data: { created, skipped },
+            data: {
+                created,
+                skipped,
+            },
         });
     })
 );

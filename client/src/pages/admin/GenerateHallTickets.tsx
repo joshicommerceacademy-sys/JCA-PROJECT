@@ -34,7 +34,11 @@ export default function GenerateHallTickets() {
   // Codes assigned as students are checked, keyed by student id — merged over the
   // fetched list so the UI reflects the freshly assigned code without waiting on a refetch.
   const [assignedCodes, setAssignedCodes] = React.useState<Record<number, string>>({})
-  const [lastResult, setLastResult] = React.useState<{ createdCount: number; skippedCount: number; examId: string } | null>(null)
+  const [lastResult, setLastResult] = React.useState<{
+    createdCount: number
+    skippedCount: number
+    examId: string
+  } | null>(null)
 
   const assignCodeMutation = useMutation({
     mutationFn: (id: number) => adminApi.students.assignCode(id),
@@ -52,8 +56,12 @@ export default function GenerateHallTickets() {
       queryClient.invalidateQueries({ queryKey: ["students"] })
       queryClient.invalidateQueries({ queryKey: ["hall-tickets"] })
       queryClient.invalidateQueries({ queryKey: ["exams"] })
-      toast.success(`Generated ${result.created.length} hall ticket(s), skipped ${result.skipped.length}`)
-      setLastResult({ createdCount: result.created.length, skippedCount: result.skipped.length, examId })
+      toast.success(`Generated ${result.created.length} hall ticket(s). Open Hall Tickets to preview or email them.`)
+      setLastResult({
+        createdCount: result.created.length,
+        skippedCount: result.skipped.length,
+        examId,
+      })
       setSelected([])
     },
     onError: (error) => toast.error(getErrorMessage(error)),
@@ -152,12 +160,17 @@ export default function GenerateHallTickets() {
       {lastResult && (
         <Card className="border-success/40 bg-success/5">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">
-            <p className="text-sm">
-              Created {lastResult.createdCount} hall ticket(s)
-              {lastResult.skippedCount > 0 && `, skipped ${lastResult.skippedCount} (already ticketed)`}.
-            </p>
+            <div className="text-sm">
+              <p>
+                Created {lastResult.createdCount} hall ticket(s)
+                {lastResult.skippedCount > 0 && `, skipped ${lastResult.skippedCount} (already ticketed)`}.
+              </p>
+              <p className="text-muted-foreground">
+                Hall tickets are ready. Open Hall Tickets to select the students you want to email.
+              </p>
+            </div>
             <Button size="sm" variant="outline" onClick={() => navigate(`/admin/hall-tickets?examId=${lastResult.examId}`)}>
-              Go to Hall Tickets to Email <ArrowRight className="size-3.5" />
+              Open Hall Tickets <ArrowRight className="size-3.5" />
             </Button>
           </CardContent>
         </Card>
