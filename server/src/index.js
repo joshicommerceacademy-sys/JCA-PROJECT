@@ -31,6 +31,7 @@ app.get("/api/health", (req, res) => {
     res.json({ status: "success", message: "JCA Exam Portal API is running.", now: new Date().toISOString() });
 });
 
+app.use("/api/email/google", require("./routes/googleEmail"));
 app.use("/api/admin/login", require("./routes/adminAuth"));
 app.use("/api/desk/login", require("./routes/deskAuth"));
 app.use("/api/files", require("./routes/files"));

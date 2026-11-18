@@ -19,18 +19,18 @@ services:
         sync: false
       - key: PUBLIC_APP_URL
         sync: false
-      - key: SMTP_HOST
+      - key: GOOGLE_CLIENT_ID
         sync: false
-      - key: SMTP_PORT
+      - key: GOOGLE_CLIENT_SECRET
         sync: false
-      - key: SMTP_USER
+      - key: GOOGLE_REDIRECT_URI
         sync: false
-      - key: SMTP_PASS
+      - key: GOOGLE_REFRESH_TOKEN
         sync: false
-      - key: SMTP_FROM_NAME
+      - key: GMAIL_USER
         sync: false
-      - key: SMTP_FROM_EMAIL
-        sync: false
+      - key: EMAIL_FROM_NAME
+        value: Joshi's Commerce Academy
       - key: MAIL_SEND_DELAY_MS
         value: "1500"
       - key: REMINDER_CRON
