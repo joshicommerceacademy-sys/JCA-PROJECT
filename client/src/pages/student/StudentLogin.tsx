@@ -7,6 +7,8 @@ import { studentApi } from "@/api/studentApi"
 import { getErrorMessage } from "@/api/client"
 import { formatDate } from "@/lib/formatDate"
 import { Button } from "@/components/ui/button"
+import { SelectionBanner, saveSelection, clearSelection } from "@/components/student/SelectionBanner"
+import jcaBadge from "@/assets/jca-badge.png"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,6 +30,7 @@ export default function StudentLogin() {
   const [refreshing, setRefreshing] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
   const autoSubmitted = React.useRef(false)
+  React.useEffect(() => { if (!urlExamId) clearSelection() }, [urlExamId])
 
   const { data: exams, isLoading: examsLoading } = useQuery({
     queryKey: ["login-exams"],
@@ -57,6 +60,8 @@ export default function StudentLogin() {
   async function handleSelectExam(id: string) {
     setExamId(id)
     setExamPassword("")
+    const picked = exams?.find((e) => String(e.id) === id)
+    if (picked) saveSelection({ examId: id, examName: picked.name, logoUrl: picked.logoUrl ?? null, rollNumber: undefined })
     try {
       const { accessPassword } = await studentApi.examAccessPassword(id)
       setExamPassword(accessPassword)
@@ -83,7 +88,8 @@ export default function StudentLogin() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center bg-background px-4 py-12">
+    <div className="flex min-h-svh flex-col bg-background"><SelectionBanner />
+    <div className="flex flex-1 flex-col items-center justify-center px-4 py-12">
       <h1 className="mb-6 text-3xl font-bold tracking-tight text-primary">Select Exam</h1>
       <Card className="w-full max-w-sm">
         <CardHeader className="flex-row items-center justify-between gap-2">
@@ -118,12 +124,19 @@ export default function StudentLogin() {
               <SelectContent>
                 {exams?.map((exam) => (
                   <SelectItem key={exam.id} value={String(exam.id)}>
-                    {exam.name}
+                    {exam.name}{(exams || []).filter((x) => x.name === exam.name).length > 1 ? ` · ${String(exam.startTime).slice(0, 5)}` : ""} — {exam.centreName || "Centre not assigned"}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+
+          {selectedExam && (
+            <div className="flex items-center justify-center gap-3 rounded-lg bg-primary px-3 py-3 text-center text-primary-foreground">
+              <img src={selectedExam.logoUrl || jcaBadge} alt="Exam logo" className="size-9 rounded bg-white p-0.5 object-contain" />
+              <span className="font-bold tracking-wide">{selectedExam.name}</span>
+            </div>
+          )}
 
           {selectedExam && (
             <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3 text-sm">
@@ -153,6 +166,7 @@ export default function StudentLogin() {
           </Button>
         </CardContent>
       </Card>
+    </div>
     </div>
   )
 }

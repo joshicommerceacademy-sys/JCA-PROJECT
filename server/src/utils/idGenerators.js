@@ -42,7 +42,21 @@ async function nextSeatNumber(examId) {
     return `S-${String(Number(count) + 1).padStart(3, "0")}`;
 }
 
+// Public application ID, e.g. JCA-7K3Q9X — random so IDs can't be guessed in sequence.
+async function nextApplicationId() {
+    const { query } = require("../db/pool");
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    for (let attempt = 0; attempt < 10; attempt++) {
+        let id = "JCA-";
+        for (let i = 0; i < 6; i++) id += alphabet[require("crypto").randomInt(alphabet.length)];
+        const [taken] = await query("SELECT 1 FROM students WHERE application_id = $1", [id]);
+        if (!taken) return id;
+    }
+    throw new Error("Could not generate an application ID.");
+}
+
 module.exports = {
+    nextApplicationId,
     nextHallTicketNumber,
     nextStudentRollNumber,
     nextStudentCode,

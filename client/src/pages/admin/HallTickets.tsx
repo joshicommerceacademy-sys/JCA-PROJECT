@@ -8,10 +8,11 @@ import { getErrorMessage } from "@/api/client"
 import type { Exam, HallTicket } from "@/api/types"
 import { ConfirmPasswordDialog } from "@/components/ConfirmPasswordDialog"
 import { formatDate } from "@/lib/formatDate"
+import { examLabel } from "@/lib/examLabel"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PhotoFallback } from "@/components/ui/media-placeholder"
@@ -32,49 +33,6 @@ interface FailedSend {
   error: string
 }
 
-function SeatCell({ ticketId, seatNumber }: { ticketId: number; seatNumber: string | null }) {
-  const queryClient = useQueryClient()
-  const [editing, setEditing] = React.useState(false)
-  const [value, setValue] = React.useState(seatNumber || "")
-
-  const updateMutation = useMutation({
-    mutationFn: () => adminApi.hallTickets.updateSeat(ticketId, value.trim()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["hall-tickets"] })
-      setEditing(false)
-      toast.success("Seat number updated")
-    },
-    onError: (error) => toast.error(getErrorMessage(error)),
-  })
-
-  if (editing) {
-    return (
-      <div className="flex items-center gap-1">
-        <Input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && value.trim() && updateMutation.mutate()}
-          className="h-7 w-20 text-xs"
-          autoFocus
-        />
-        <Button size="sm" variant="ghost" className="h-7 px-2" disabled={!value.trim() || updateMutation.isPending} onClick={() => updateMutation.mutate()}>
-          Save
-        </Button>
-      </div>
-    )
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => setEditing(true)}
-      className="font-mono text-xs underline decoration-dotted underline-offset-2 hover:text-primary"
-    >
-      {seatNumber || "Set seat"}
-    </button>
-  )
-}
-
 export default function HallTickets() {
   const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
@@ -84,6 +42,7 @@ export default function HallTickets() {
   })
   const [examId, setExamId] = React.useState<string>(searchParams.get("examId") || "all")
   const [selected, setSelected] = React.useState<number[]>([])
+  const [roll, setRoll] = React.useState<string>("__all__")
   const [failedSends, setFailedSends] = React.useState<FailedSend[]>([])
   const [confirmTarget, setConfirmTarget] = React.useState<{ type: "single"; id: number } | { type: "bulk"; ids: number[] } | null>(null)
 
@@ -92,7 +51,8 @@ export default function HallTickets() {
     queryFn: () => adminApi.hallTickets.list(examId !== "all" ? { examId } : undefined),
   })
 
-  const list = tickets || []
+  const allTickets = tickets || []
+  const list = roll === "__all__" ? allTickets : allTickets.filter((t) => t.roll_number === roll)
 
   function toggleAll(checked: boolean) {
     setSelected(checked ? list.map((t) => t.id) : [])
@@ -138,15 +98,30 @@ export default function HallTickets() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Hall Tickets</h1>
-          <p className="text-sm text-muted-foreground">Generated from the Generate Hall Tickets page</p>
+          <p className="text-sm text-muted-foreground">Issued when an exam is scheduled for its registered students. Verified candidates are emailed their PDF automatically.</p>
         </div>
-        <Select value={examId} onValueChange={setExamId}>
-          <SelectTrigger className="w-56"><SelectValue placeholder="Filter by exam" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Exams</SelectItem>
-            {exams?.map((e) => <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex w-56 flex-col gap-1.5">
+            <Label>Select Exam Name</Label>
+            <Select value={examId} onValueChange={(v) => { setExamId(v); setRoll("__all__"); setSelected([]) }}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select exam" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Exams</SelectItem>
+                {exams?.map((e) => <SelectItem key={e.id} value={String(e.id)}>{examLabel(e, exams)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex w-44 flex-col gap-1.5">
+            <Label>Select Roll Number</Label>
+            <Select value={roll} onValueChange={setRoll} disabled={!allTickets.length}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="All" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All roll numbers</SelectItem>
+                {allTickets.map((t) => <SelectItem key={t.id} value={t.roll_number}>{t.roll_number}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </div>
 
       <Card>
@@ -167,7 +142,6 @@ export default function HallTickets() {
                 </TableHead>
                 <TableHead>Student</TableHead>
                 <TableHead>Hall Ticket No.</TableHead>
-                <TableHead>Seat</TableHead>
                 <TableHead>Exam</TableHead>
                 <TableHead>Date &amp; Time</TableHead>
                 <TableHead>Centre</TableHead>
@@ -177,10 +151,10 @@ export default function HallTickets() {
             </TableHeader>
             <TableBody>
               {isLoading && (
-                <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground">Loading...</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Loading...</TableCell></TableRow>
               )}
               {!isLoading && list.length === 0 && (
-                <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground">No hall tickets generated yet.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">No hall tickets generated yet.</TableCell></TableRow>
               )}
               {list.map((t) => (
                 <TableRow key={t.id}>
@@ -200,7 +174,6 @@ export default function HallTickets() {
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-xs">{t.hall_ticket_number}</TableCell>
-                  <TableCell><SeatCell ticketId={t.id} seatNumber={t.seat_number} /></TableCell>
                   <TableCell>{t.exam_name}</TableCell>
                   <TableCell>{formatDate(t.exam_date)} · {t.start_time}</TableCell>
                   <TableCell>{t.centre_name}</TableCell>

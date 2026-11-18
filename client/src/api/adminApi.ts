@@ -2,7 +2,7 @@ import { api } from "./client"
 import type {
   Centre, Standard, Exam, Student, QuestionBank, Question, ExamResult, HallTicket, DashboardStats,
   AttendanceRow, ReappearRequest, ReappearEligibleCandidate, MonitorData, ExamAnalytics, BatchAnalytics,
-  AppSettings,
+  AppSettings, CentreLab, RegisteredExam,
 } from "./types"
 
 const unwrap = <T,>(promise: Promise<{ data: { data: T } }>) => promise.then((res) => res.data.data)
@@ -15,6 +15,13 @@ export const adminApi = {
     create: (body: Partial<Centre>) => unwrap<Centre>(api.post("/admin/centres", body)),
     update: (id: number, body: Partial<Centre>) => unwrap<Centre>(api.put(`/admin/centres/${id}`, body)),
     remove: (id: number) => api.delete(`/admin/centres/${id}`),
+    addLab: (centreId: number, body: { name: string; capacity: number }) =>
+      unwrap<CentreLab>(api.post(`/admin/centres/${centreId}/labs`, body)),
+    updateLab: (labId: number, body: { name: string; capacity: number }) =>
+      unwrap<CentreLab>(api.put(`/admin/centres/labs/${labId}`, body)),
+    removeLab: (labId: number) => api.delete(`/admin/centres/labs/${labId}`),
+    addSeats: (labId: number, seatNumbers: string) => api.post(`/admin/centres/labs/${labId}/seats`, { seatNumbers }),
+    removeSeat: (labId: number, seat: string) => api.delete(`/admin/centres/labs/${labId}/seats/${encodeURIComponent(seat)}`),
   },
 
   standards: {
@@ -34,9 +41,28 @@ export const adminApi = {
     update: (id: number, formData: FormData) =>
       unwrap<Student>(api.put(`/admin/students/${id}`, formData, { headers: { "Content-Type": "multipart/form-data" } })),
     remove: (id: number) => api.delete(`/admin/students/${id}`),
+    assignSlot: (id: number, examId: number) => unwrap<{ emailed: boolean }>(api.put(`/admin/students/${id}/assign-slot`, { examId })),
+    deskAllow: (id: number) =>
+      unwrap<{ rollNumber: string | null; seatNumber: string | null; labName: string | null }>(api.put(`/admin/students/${id}/desk-allow`)),
+    deskDisallow: (id: number, reason: string) => api.put(`/admin/students/${id}/desk-disallow`, { reason }),
+    deskReappear: (id: number) => api.put(`/admin/students/${id}/desk-reappear`),
+    // Verify All / Revoke All for one batch (slot).
+    deskVerifyAll: (slotId: number) =>
+      unwrap<{ allowed: number; failed: { rollNumber: string; error: string }[] }>(api.put("/admin/students/desk-verify-all", { slotId })),
+    deskRevokeAll: (slotId: number) => unwrap<{ revoked: number }>(api.put("/admin/students/desk-revoke-all", { slotId })),
+    uploadLivePhoto: (id: number, blob: Blob) => {
+      const fd = new FormData()
+      fd.append("photo", blob, "live.jpg")
+      return api.put(`/admin/students/${id}/live-photo`, fd)
+    },
+    verify: (studentIds: number[]) =>
+      unwrap<{ verified: number; ticketsIssued: number; emailed: number; emailFailed: { studentId: number; error: string }[] }>(
+        api.post("/admin/students/verify", { studentIds })
+      ),
     allow: (id: number, seatNumber?: string) =>
       unwrap<{ rollNumber: string; seatNumber: string | null }>(api.put(`/admin/students/${id}/allow`, { seatNumber })),
     disallow: (id: number) => api.put(`/admin/students/${id}/disallow`),
+    allowExam: (id: number) => unwrap<{ exam_access_allowed_at: string }>(api.put(`/admin/students/${id}/exam-allow`)),
     bulkAllow: (studentIds: number[]) => api.post("/admin/students/bulk-allow", { studentIds }),
     bulkDisallow: (studentIds: number[]) => api.post("/admin/students/bulk-disallow", { studentIds }),
     checkIn: (id: number) => api.put(`/admin/students/${id}/check-in`),
@@ -68,6 +94,12 @@ export const adminApi = {
       ),
   },
 
+  registeredExams: {
+    list: () => unwrap<RegisteredExam[]>(api.get("/admin/registered-exams")),
+    create: (name: string) => unwrap<RegisteredExam>(api.post("/admin/registered-exams", { name })),
+    remove: (id: number) => api.delete(`/admin/registered-exams/${id}`),
+  },
+
   exams: {
     list: (params?: Record<string, string>) => unwrap<Exam[]>(api.get("/admin/exams", { params })),
     get: (id: number) =>
@@ -81,6 +113,8 @@ export const adminApi = {
     downloadAttendanceSheet: (id: number) =>
       api.get(`/admin/exams/${id}/attendance-sheet`, { responseType: "blob" }),
     start: (id: number) => unwrap<Exam>(api.put(`/admin/exams/${id}/start`)),
+    stop: (id: number, password: string) => api.post(`/admin/exams/${id}/stop`, { password }),
+    setSections: (id: number, sections: Record<string, unknown>[]) => api.post(`/admin/exams/${id}/sections`, { sections }),
     uploadLogo: (id: number, file: File) => {
       const formData = new FormData()
       formData.append("logo", file)
@@ -95,6 +129,9 @@ export const adminApi = {
     get: (id: number) => unwrap<ExamResult & { answers: unknown[] }>(api.get(`/admin/results/${id}`)),
     remove: (id: number) => api.delete(`/admin/results/${id}`),
     downloadPdf: (id: number) => api.get(`/admin/results/${id}/pdf`, { responseType: "blob" }),
+    // Enable / disable an exam's results on the public Results page (all its batches at once).
+    setExamVisibility: (examIds: number[], enabled: boolean, includePdf: boolean) =>
+      api.post("/admin/results/exam-visibility", { examIds, enabled, includePdf }),
     send: (id: number, confirmPassword: string) => api.post(`/admin/results/${id}/send`, { confirmPassword }),
     bulkSend: (resultIds: number[], confirmPassword: string) =>
       unwrap<{
@@ -125,6 +162,8 @@ export const adminApi = {
       unwrap<ReappearEligibleCandidate[]>(api.get("/admin/reappear/eligible", { params: { examId } })),
     create: (body: { studentId: number; examId: number; reason?: string }) =>
       unwrap<{ id: number; remainingMinutes: number }>(api.post("/admin/reappear", body)),
+    createBatch: (body: { examId: number; reason?: string }) =>
+      unwrap<{ grantedCount: number; skippedCount: number; granted: { id: number; studentId: number; remainingMinutes: number }[] }>(api.post("/admin/reappear/batch", body)),
     remove: (id: number) => api.delete(`/admin/reappear/${id}`),
   },
 

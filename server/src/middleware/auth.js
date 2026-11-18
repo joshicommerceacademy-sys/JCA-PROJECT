@@ -30,6 +30,23 @@ function requireAdmin(req, res, next) {
     }
 }
 
+// Admin, or a Verification Desk session (role "desk", scoped to one exam via payload.examId).
+function requireAdminOrDesk(req, res, next) {
+    try {
+        const payload = verifyToken(req);
+        if (payload.role === "admin") {
+            req.admin = payload;
+        } else if (payload.role === "desk") {
+            req.desk = payload;
+        } else {
+            return res.status(403).json({ status: "error", message: "Admin or verification desk access required." });
+        }
+        next();
+    } catch (error) {
+        res.status(error.status || 401).json({ status: "error", message: error.message });
+    }
+}
+
 function requireStudent(req, res, next) {
     try {
         const payload = verifyToken(req);
@@ -43,4 +60,4 @@ function requireStudent(req, res, next) {
     }
 }
 
-module.exports = { requireAdmin, requireStudent };
+module.exports = { requireAdmin, requireAdminOrDesk, requireStudent };

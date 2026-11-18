@@ -10,23 +10,18 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PhotoFallback } from "@/components/ui/media-placeholder"
+import { ExamStartTimer } from "@/components/student/ExamStartTimer"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Input } from "@/components/ui/input"
+import { toast } from "sonner"
+import { SelectionBanner, saveSelection } from "@/components/student/SelectionBanner"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog"
 import jcaBadge from "@/assets/jca-badge.png"
-
-const INSTRUCTIONS = [
-  "The exam is timed. Once started, the timer runs continuously until the scheduled end time.",
-  "The timer is based on the exam's scheduled duration, not on when you personally logged in.",
-  "You can navigate between questions freely using the question palette or Next/Previous buttons.",
-  "You may change your selected answer for any question at any time before submitting.",
-  "Do not switch tabs or minimize the browser — this will be flagged and may auto-submit your exam.",
-  "Do not refresh or close the browser window during the exam.",
-  "Ensure you have a stable internet connection throughout the exam.",
-  "Once submitted, answers cannot be changed under any circumstances.",
-  "This exam must be taken in fullscreen mode. Exiting fullscreen or switching tabs more than once will auto-submit your exam.",
-  "The exam will not open before its scheduled start time, even if you're logged in earlier.",
-]
+import { buildInstructions } from "@/lib/instructions"
 
 export default function StudentInstructions() {
   useDisableCopy()
@@ -34,8 +29,28 @@ export default function StudentInstructions() {
   const { data, isLoading, error } = useQuery({ queryKey: ["student-instructions"], queryFn: () => studentApi.instructions() })
   const [agreed, setAgreed] = React.useState(false)
 
-  function handleContinue() {
-    navigate("/student/exam-summary")
+  const [showInstructions, setShowInstructions] = React.useState(false)
+  const [askPassword, setAskPassword] = React.useState(false)
+  const [examPassword, setExamPassword] = React.useState("")
+  const [verifying, setVerifying] = React.useState(false)
+
+  React.useEffect(() => {
+    if (data) saveSelection({ examName: data.exam.name, rollNumber: data.student.rollNumber })
+  }, [data])
+
+  // Next opens the exam-password prompt; the summary page is only reachable once it checks out.
+  async function handleVerifyPassword(e: React.FormEvent) {
+    e.preventDefault()
+    setVerifying(true)
+    try {
+      await studentApi.verifyExamPassword(examPassword)
+      setAskPassword(false)
+      navigate("/student/exam-summary", { state: { passwordVerified: true } })
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    } finally {
+      setVerifying(false)
+    }
   }
 
   if (isLoading) {
@@ -57,10 +72,11 @@ export default function StudentInstructions() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col items-center bg-muted/30 p-4 py-10 select-none no-callout">
-      <div className="mb-4 flex items-center gap-2">
-        <img src={jcaBadge} alt="Joshi's Commerce Academy" className="size-8" />
-        <span className="font-semibold text-foreground">Joshi's Commerce Academy</span>
+    <div className="flex min-h-svh flex-col bg-background select-none no-callout"><SelectionBanner />
+    <div className="flex flex-1 flex-col items-center p-4 py-10">
+      <div className="mb-4 flex w-full max-w-2xl items-center justify-center gap-3 rounded-xl bg-primary px-4 py-3 text-center text-primary-foreground shadow-sm">
+        <img src={data.exam.logoUrl || jcaBadge} alt="Exam logo" className="size-9 rounded bg-white p-0.5 object-contain" />
+        <span className="text-lg font-bold tracking-wide">{data.exam.name}</span>
       </div>
       <Card className="w-full max-w-2xl">
         <CardHeader className="items-center text-center">
@@ -90,37 +106,49 @@ export default function StudentInstructions() {
           <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4 text-sm sm:grid-cols-4">
             <div><p className="text-muted-foreground">Exam</p><p className="font-medium">{data.exam.name}</p></div>
             <div><p className="text-muted-foreground">Date</p><p className="font-medium">{formatDate(data.exam.examDate)}</p></div>
-            <div>
-              <p className="text-muted-foreground">{data.resuming ? "Time Remaining" : "Duration"}</p>
-              <p className="font-medium">
-                {data.resuming ? `${data.remainingMinutes} min left` : `${data.exam.durationMinutes} min`}
-              </p>
-            </div>
+            <ExamStartTimer examDate={data.exam.examDate} startTime={data.exam.startTime} resuming={data.resuming} remainingMinutes={data.remainingMinutes} />
             <div><p className="text-muted-foreground">Questions</p><p className="font-medium">{data.totalQuestions}</p></div>
           </div>
 
-          <div>
-            <h3 className="mb-2 text-sm font-semibold">Instructions</h3>
-            <ul className="flex flex-col gap-2">
-              {INSTRUCTIONS.map((instr, i) => (
-                <li key={i} className="flex gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
-                  {instr}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <Button type="button" variant="outline" onClick={() => setShowInstructions(true)}>Instructions</Button>
 
           <div className="flex items-start gap-2 rounded-lg border p-3">
             <Checkbox id="agreed" className="mt-0.5" checked={agreed} onCheckedChange={(c) => setAgreed(!!c)} />
-            <Label htmlFor="agreed" className="font-normal">I have read all the instructions above</Label>
+            <Label htmlFor="agreed" className="font-normal">I have read all the instructions</Label>
           </div>
 
-          <Button size="lg" onClick={handleContinue} disabled={data.totalQuestions === 0 || !agreed}>
-            {data.resuming ? "Continue to Resume" : "Continue"}
+          <Button size="lg" onClick={() => { setExamPassword(""); setAskPassword(true) }} disabled={data.totalQuestions === 0 || !agreed}>
+            {data.resuming ? "Next (Resume)" : "Next"}
           </Button>
         </CardContent>
       </Card>
+    </div>
+    <Dialog open={showInstructions} onOpenChange={setShowInstructions}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader><DialogTitle>Instructions</DialogTitle></DialogHeader>
+        <ul className="flex flex-col gap-2">
+          {buildInstructions(data.exam).map((instr, i) => (
+            <li key={i} className="flex gap-2 text-sm text-muted-foreground">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
+              {instr}
+            </li>
+          ))}
+        </ul>
+        <DialogFooter><Button onClick={() => setShowInstructions(false)}>Close</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={askPassword} onOpenChange={setAskPassword}>
+      <DialogContent>
+        <form onSubmit={handleVerifyPassword} className="flex flex-col gap-4">
+          <DialogHeader>
+            <DialogTitle>Enter Exam Password</DialogTitle>
+            <DialogDescription>Enter the exam password to continue to the exam details.</DialogDescription>
+          </DialogHeader>
+          <Input autoFocus value={examPassword} onChange={(e) => setExamPassword(e.target.value)} placeholder="Exam password" required />
+          <DialogFooter><Button type="submit" disabled={verifying || !examPassword.trim()}>{verifying ? "Checking..." : "Continue"}</Button></DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
     </div>
   )
 }

@@ -69,6 +69,15 @@ export default function Reappear() {
     onError: (error) => toast.error(getErrorMessage(error)),
   })
 
+  const batchMutation = useMutation({
+    mutationFn: () => adminApi.reappear.createBatch({ examId: Number(examId), reason: "Batch reappear" }),
+    onSuccess: (data) => {
+      invalidate()
+      toast.success(`Batch reappear granted: ${data.grantedCount} candidates; ${data.skippedCount} already had pending requests`)
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  })
+
   const deleteMutation = useMutation({
     mutationFn: (id: number) => adminApi.reappear.remove(id),
     onSuccess: () => {
@@ -106,6 +115,14 @@ export default function Reappear() {
             {exams?.map((e) => <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>)}
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="outline" disabled={!examId || !candidateList.length || batchMutation.isPending}
+          onClick={() => { if (confirm(`Grant reappear to all ${candidateList.length} eligible candidates in this exam? Each gets only their detected remaining time.`)) batchMutation.mutate() }}>
+          <RotateCcw className="size-4" /> {batchMutation.isPending ? "Granting batch..." : `Grant Reappear Batch (${candidateList.length})`}
+        </Button>
+        <span className="text-xs text-muted-foreground">Batch applies to every eligible interrupted candidate in the selected exam.</span>
       </div>
 
       <Card>

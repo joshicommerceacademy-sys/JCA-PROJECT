@@ -1,14 +1,26 @@
 const express = require("express");
 const { query } = require("../db/pool");
 const { asyncHandler, ApiError } = require("../utils/asyncHandler");
+const { submitAttempt } = require("../utils/submitAttempt");
 const { requireStudent } = require("../middleware/auth");
 const { getExamWindow } = require("../utils/examWindow");
 const { shuffle } = require("../utils/shuffle");
 const { buildSubjectBreakdown } = require("../utils/subjectBreakdown");
 const { getSettings } = require("../utils/settings");
+const { mergeAnswers } = require("../utils/attemptSync");
 
 const router = express.Router();
 router.use(requireStudent);
+
+// When an exam hides the provisional result, the score must not reach the browser at all
+// (hiding it only in the UI would still leave it readable in the network response).
+function withVisibility(row, exam) {
+    const show = exam.show_provisional_result;
+    if (show !== false) return { ...row, show_provisional_result: show };
+    const hidden = { ...row, show_provisional_result: false };
+    for (const k of ["correct_count", "wrong_count", "unanswered_count", "marks_obtained", "total_marks", "percentage", "result_status"]) hidden[k] = null;
+    return hidden;
+}
 
 // One student's personal display order: shuffled independently within each section so
 // section boundaries never move, only the order within each subject does.
@@ -79,7 +91,7 @@ async function buildSectionedQuestions(examId, questionOrder) {
 
 async function loadStudentAndExam(studentId) {
     const [student] = await query(
-        `SELECT st.*, c.name AS centre_name, s.name AS standard_name
+        `SELECT st.*, c.name AS centre_name, c.code AS centre_code, s.name AS standard_name
          FROM students st
          LEFT JOIN centres c ON c.id = st.centre_id
          LEFT JOIN standards s ON s.id = st.standard_id
@@ -96,6 +108,21 @@ async function loadStudentAndExam(studentId) {
 }
 
 // Instructions / pre-exam summary
+// The candidate re-enters the exam password (set by the admin on the Exam Schedule page) on the
+// instructions page before the exam summary is shown.
+router.post(
+    "/verify-exam-password",
+    asyncHandler(async (req, res) => {
+        const { exam } = await loadStudentAndExam(req.student.id);
+        const password = String(req.body.password || "").trim();
+        if (!password) throw new ApiError(400, "Please enter the exam password.");
+        if (!exam.access_password || password !== exam.access_password) {
+            throw new ApiError(401, "Incorrect exam password.");
+        }
+        res.json({ status: "success", data: { ok: true } });
+    })
+);
+
 router.get(
     "/instructions",
     asyncHandler(async (req, res) => {
@@ -141,6 +168,9 @@ router.get(
                     examDate: exam.exam_date,
                     startTime: exam.start_time,
                     durationMinutes: exam.duration_minutes,
+                    logoUrl: exam.logo_url || null,
+                    submitButtonAfterMinutes: Number(exam.submit_button_after_minutes || 0),
+                    compensateLateLogin: exam.compensate_late_login !== false,
                 },
                 sections: sectionRows.map((s) => ({ label: s.subject_label, questionCount: s.question_count })),
                 totalQuestions: Number(totalQuestions),
@@ -165,6 +195,9 @@ router.post(
 
         if (attempt?.status === "submitted") {
             throw new ApiError(403, "You have already submitted this exam.");
+        }
+        if (exam.stopped_at) {
+            throw new ApiError(403, "This exam has been stopped by the administrator.");
         }
 
         if (!attempt) {
@@ -212,14 +245,13 @@ router.post(
             attempt.question_order = order;
         }
 
-        // Optional, off by default (Settings page): records this candidate's current IP on
-        // every start/resume so it stays up to date if they reconnect from a different
-        // network mid-exam. req.ip resolves the real client address via X-Forwarded-For
-        // once app.set("trust proxy", true) is in effect (see index.js).
+        // Always record the device's real network address on every start/resume so it stays
+        // current if the candidate reconnects from another network mid-exam. req.ip resolves the
+        // real client address via X-Forwarded-For (app.set("trust proxy", true) in index.js);
+        // the IPv4-mapped IPv6 prefix is stripped so admins see a plain address.
         const settings = await getSettings();
-        if (settings.ip_capture_enabled) {
-            await query("UPDATE exam_attempts SET ip_address = $1 WHERE id = $2", [req.ip, attempt.id]);
-        }
+        const clientIp = String(req.ip || "").replace(/^::ffff:/, "") || null;
+        await query("UPDATE exam_attempts SET ip_address = $1 WHERE id = $2", [clientIp, attempt.id]);
 
         const sections = await buildSectionedQuestions(exam.id, attempt.question_order);
 
@@ -234,11 +266,14 @@ router.post(
                 attemptId: attempt.id,
                 startedAt: attempt.started_at,
                 endsAt: attempt.ends_at,
-                exam: { id: exam.id, name: exam.name, durationMinutes: exam.duration_minutes, logoUrl: exam.logo_url },
+                exam: { id: exam.id, name: exam.name, durationMinutes: exam.duration_minutes, logoUrl: exam.logo_url, showPhotoSignature: !!exam.show_photo_signature, submitButtonAfterMinutes: Number(exam.submit_button_after_minutes || 0) },
                 student: {
                     rollNumber: student.roll_number,
                     fullName: student.full_name,
                     photoUrl: student.photo_url,
+                    signatureUrl: student.signature_url || null,
+                    centreName: student.centre_name,
+                    centreCode: student.centre_code,
                 },
                 sections,
                 answers: Object.fromEntries(savedAnswers.map((a) => [a.question_id, a.selected_option])),
@@ -263,7 +298,7 @@ router.put(
             "SELECT * FROM exam_attempts WHERE student_id = $1 AND status = 'in_progress' ORDER BY id DESC LIMIT 1",
             [req.student.id]
         );
-        if (!attempt) throw new ApiError(400, "No active exam attempt.");
+        if (!attempt) throw new ApiError(409, "This exam has ended.", "ATTEMPT_CLOSED");
         if (new Date() >= new Date(attempt.ends_at)) {
             throw new ApiError(403, "Time is up for this exam.");
         }
@@ -280,79 +315,56 @@ router.put(
     })
 );
 
+// Bulk answer sync: a device that lost its connection keeps every answer locally and pushes them
+// all here once it is back online (and again inside /attempt/submit). Accepted while the attempt is
+// still open, including a short window after the deadline for a device that was offline when its
+// timer ran out (see utils/attemptSync.js).
+router.put(
+    "/attempt/answers",
+    asyncHandler(async (req, res) => {
+        const [attempt] = await query(
+            "SELECT * FROM exam_attempts WHERE student_id = $1 ORDER BY id DESC LIMIT 1",
+            [req.student.id]
+        );
+        if (!attempt || attempt.status !== "in_progress") {
+            throw new ApiError(409, "This exam has ended.", "ATTEMPT_CLOSED");
+        }
+        const [exam] = await query("SELECT * FROM exams WHERE id = $1", [attempt.exam_id]);
+        const stored = await mergeAnswers(attempt, exam, req.body.answers);
+        res.json({ status: "success", data: { stored } });
+    })
+);
+
 router.post(
     "/attempt/submit",
     asyncHandler(async (req, res) => {
-        const { reason } = req.body;
+        const { reason, answers } = req.body;
         const validReasons = ["manual", "timeout", "tab_switch", "devtools", "fullscreen_exit"];
         const submitReason = validReasons.includes(reason) ? reason : "manual";
 
         const [attempt] = await query(
-            "SELECT * FROM exam_attempts WHERE student_id = $1 AND status = 'in_progress' ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM exam_attempts WHERE student_id = $1 ORDER BY id DESC LIMIT 1",
             [req.student.id]
         );
         if (!attempt) throw new ApiError(400, "No active exam attempt to submit.");
 
         const [exam] = await query("SELECT * FROM exams WHERE id = $1", [attempt.exam_id]);
 
-        const questions = await query(
-            "SELECT q.id, q.correct_answer, q.marks FROM exam_questions eq JOIN questions q ON q.id = eq.question_id WHERE eq.exam_id = $1",
-            [attempt.exam_id]
-        );
-        const answers = await query(
-            "SELECT question_id, selected_option FROM exam_attempt_answers WHERE attempt_id = $1",
-            [attempt.id]
-        );
-        const answerMap = new Map(answers.map((a) => [a.question_id, a.selected_option]));
-
-        let correct = 0;
-        let wrong = 0;
-        let unanswered = 0;
-        let marksObtained = 0;
-        let totalMarks = 0;
-
-        for (const q of questions) {
-            totalMarks += q.marks;
-            const selected = answerMap.get(q.id);
-            if (!selected) {
-                unanswered += 1;
-                continue;
-            }
-            const isCorrect = selected === q.correct_answer;
-            // Negative marking (when enabled for this exam) deducts a fixed 25% of the
-            // question's own marks for a wrong answer — 1 mark -> -0.25, 2 -> -0.50,
-            // 3 -> -0.75, 4 -> -1.00, derived from q.marks, not a separately stored rate.
-            const obtained = isCorrect ? q.marks : exam.negative_marking ? -(q.marks * 0.25) : 0;
-            if (isCorrect) {
-                correct += 1;
-            } else {
-                wrong += 1;
-            }
-            marksObtained += obtained;
-            await query(
-                `UPDATE exam_attempt_answers SET is_correct = $1, marks_obtained = $2
-                 WHERE attempt_id = $3 AND question_id = $4`,
-                [isCorrect, obtained, attempt.id, q.id]
-            );
+        // Idempotent: a device that was offline may retry its submit after the exam was already
+        // finalised (admin stop, sweeper, or an earlier request whose response was lost). Hand back
+        // the stored result instead of an error so the candidate's screen can finish cleanly.
+        if (attempt.status === "submitted") {
+            return res.json({ status: "success", data: withVisibility(attempt, exam) });
         }
 
-        const percentage = totalMarks > 0 ? Number(((marksObtained / totalMarks) * 100).toFixed(2)) : 0;
-        const resultStatus = percentage >= Number(exam.passing_percentage) ? "passed" : "failed";
+        // Every answer the device holds locally goes in with the submit, so nothing recorded
+        // while offline is lost.
+        await mergeAnswers(attempt, exam, answers);
+        const updated = await submitAttempt(attempt, exam, submitReason);
 
-        const [updated] = await query(
-            `UPDATE exam_attempts SET status = 'submitted', submitted_at = now(), submit_reason = $1,
-                total_questions = $2, correct_count = $3, wrong_count = $4, unanswered_count = $5,
-                marks_obtained = $6, total_marks = $7, percentage = $8, result_status = $9
-             WHERE id = $10 RETURNING *`,
-            [
-                submitReason, questions.length, correct, wrong, unanswered,
-                marksObtained, totalMarks, percentage, resultStatus, attempt.id,
-            ]
-        );
-
-        // Result emails are deliberately not sent here — the admin sends them manually (with a
+        // Result emails are deliberately not sent here - the admin sends them manually (with a
         // full answer-sheet PDF attached) from the Results page once results are ready to release.
-        res.json({ status: "success", data: { ...updated, show_provisional_result: exam.show_provisional_result } });
+        res.json({ status: "success", data: withVisibility(updated, exam) });
     })
 );
 
@@ -368,7 +380,7 @@ router.get(
         );
         if (!attempt) throw new ApiError(404, "No submitted result found.");
         const subjects = await buildSubjectBreakdown(attempt.id, attempt.exam_id);
-        res.json({ status: "success", data: { ...attempt, subjects } });
+        res.json({ status: "success", data: { ...withVisibility(attempt, attempt), subjects: attempt.show_provisional_result === false ? [] : subjects } });
     })
 );
 

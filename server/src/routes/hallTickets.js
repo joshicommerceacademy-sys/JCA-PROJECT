@@ -1,49 +1,21 @@
 const express = require("express");
 const { query, pool } = require("../db/pool");
 const { asyncHandler, ApiError } = require("../utils/asyncHandler");
-const { requireAdmin } = require("../middleware/auth");
+const { requireAdmin, requireAdminOrDesk } = require("../middleware/auth");
+const { generateHallTickets } = require("../utils/hallTicketGenerator");
 const { sendMail, sendMailBatch } = require("../utils/mailer");
 const { buildHallTicketPdf } = require("../utils/hallTicketPdf");
 const { assertConfirmPassword } = require("../utils/emailGate");
 const { nextHallTicketNumber, nextStudentRollNumber, nextStudentCode, nextSeatNumber } = require("../utils/idGenerators");
-const { studentLoginLink } = require("../utils/links");
+const { assertDeskStudents } = require("../utils/deskScope");
+const { SELECT_TICKET_JOIN, hallTicketEmailHtml, sendHallTicketEmail } = require("../utils/hallTicketMail");
 
 const router = express.Router();
-router.use(requireAdmin);
-
-const SELECT_TICKET_JOIN = `
-    SELECT ht.*, st.roll_number, st.full_name AS student_name, st.photo_url, st.signature_url, st.email, st.dob,
-           st.standard_id, s.name AS standard_name, e.name AS exam_name,
-           e.exam_date, e.start_time, e.duration_minutes, c.name AS centre_name,
-           c.address AS centre_address, c.city AS centre_city
-    FROM hall_tickets ht
-    JOIN students st ON st.id = ht.student_id
-    JOIN exams e ON e.id = ht.exam_id
-    LEFT JOIN standards s ON s.id = st.standard_id
-    LEFT JOIN centres c ON c.id = st.centre_id
-`;
-
-function cityLine(ticket) {
-    return ticket.centre_city ? `${ticket.centre_city}, ${ticket.centre_address}` : (ticket.centre_address || "—");
-}
-
-function hallTicketEmailHtml(ticket) {
-    const link = studentLoginLink(ticket.exam_id);
-    return `
-        <p>Dear ${ticket.student_name},</p>
-        <p>Please find attached your hall ticket for <strong>${ticket.exam_name}</strong>.</p>
-        <ul>
-            <li><strong>Date:</strong> ${new Date(ticket.exam_date).toLocaleDateString()}</li>
-            <li><strong>Time:</strong> ${ticket.start_time}</li>
-            <li><strong>City:</strong> ${cityLine(ticket)}</li>
-            <li><strong>Hall Ticket No.:</strong> ${ticket.hall_ticket_number}</li>
-        </ul>
-        <p>The attached PDF is password-protected — enter your date of birth in
-        <strong>DDMMYYYY</strong> format to open it.</p>
-        <p>When it's time for your exam, log in here: <a href="${link}">${link}</a></p>
-        <p>Joshi's Commerce Academy</p>
-    `;
-}
+// Everything here is admin-only except POST /generate, which a Verification Desk session (scoped
+// to a single exam) may also call.
+router.use((req, res, next) =>
+    req.method === "POST" && req.path === "/generate" ? requireAdminOrDesk(req, res, next) : requireAdmin(req, res, next)
+);
 
 router.get(
     "/",
@@ -72,81 +44,15 @@ router.post(
     "/generate",
     asyncHandler(async (req, res) => {
         const { studentIds, standardId, examId } = req.body;
-        if (!Array.isArray(studentIds) || studentIds.length === 0 || !standardId || !examId) {
-            throw new ApiError(400, "studentIds, standardId and examId are required.");
+        if (!Array.isArray(studentIds) || studentIds.length === 0 || !examId) {
+            throw new ApiError(400, "studentIds and examId are required.");
+        }
+        if (req.desk) {
+            if (Number(examId) !== Number(req.desk.examId)) throw new ApiError(403, "This desk can only work on its own exam.");
+            await assertDeskStudents(req.desk, studentIds);
         }
 
-        const created = [];
-        const skipped = [];
-
-        for (const studentId of studentIds) {
-            const [student] = await query("SELECT * FROM students WHERE id = $1", [studentId]);
-            if (!student) {
-                skipped.push({ studentId, reason: "Student not found." });
-                continue;
-            }
-
-            const [existingTicket] = await query(
-                "SELECT id FROM hall_tickets WHERE student_id = $1 AND exam_id = $2",
-                [studentId, examId]
-            );
-            if (existingTicket) {
-                skipped.push({ studentId, studentName: student.full_name, reason: "Already has a hall ticket for this exam." });
-                continue;
-            }
-
-            const client = await pool.connect();
-            try {
-                await client.query("BEGIN");
-
-                let rollNumber = student.roll_number;
-                if (!rollNumber) {
-                    rollNumber = await nextStudentRollNumber();
-                }
-                let studentCode = student.student_code;
-                if (!studentCode) {
-                    studentCode = await nextStudentCode();
-                }
-
-                // A student's "allowed" status is specific to the exam they were allowed for —
-                // being approved for exam A must never carry over as automatic access to exam B.
-                // If this hall ticket assigns the student to a *different* exam than the one
-                // currently on their record, reset status/check-in back to pending so the admin
-                // has to explicitly re-approve them on the Verification page for the new exam.
-                // Re-generating a ticket for the same exam (exam_id unchanged) leaves status alone.
-                const isDifferentExam = student.exam_id && Number(student.exam_id) !== Number(examId);
-
-                await client.query(
-                    `UPDATE students SET roll_number = $1, student_code = $2, standard_id = $3, exam_id = $4,
-                        status = CASE WHEN $6 THEN 'pending' ELSE status END,
-                        checked_in_at = CASE WHEN $6 THEN NULL ELSE checked_in_at END,
-                        updated_at = now()
-                     WHERE id = $5`,
-                    [rollNumber, studentCode, standardId, examId, studentId, isDifferentExam]
-                );
-
-                const hallTicketNumber = await nextHallTicketNumber();
-                const seatNumber = await nextSeatNumber(examId);
-                const ticketResult = await client.query(
-                    `INSERT INTO hall_tickets (student_id, exam_id, hall_ticket_number, seat_number)
-                     VALUES ($1, $2, $3, $4) RETURNING id`,
-                    [studentId, examId, hallTicketNumber, seatNumber]
-                );
-
-                await client.query("COMMIT");
-                created.push({
-                    studentId,
-                    studentName: student.full_name,
-                    hallTicketId: ticketResult.rows[0].id,
-                    rollNumber,
-                });
-            } catch (error) {
-                await client.query("ROLLBACK");
-                skipped.push({ studentId, studentName: student.full_name, reason: error.message });
-            } finally {
-                client.release();
-            }
-        }
+        const { created, skipped } = await generateHallTickets({ studentIds, standardId, examId });
 
         // Hall-ticket generation only creates the tickets.
         // Emailing is intentionally manual from the Hall Tickets page so the admin can

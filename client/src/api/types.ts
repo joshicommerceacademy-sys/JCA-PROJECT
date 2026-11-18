@@ -1,5 +1,14 @@
+export interface CentreLab {
+  id: number
+  name: string
+  capacity: number
+  seats?: string[]
+}
+
 export interface Centre {
   id: number
+  total_capacity?: number
+  labs?: CentreLab[]
   name: string
   code: string
   address: string
@@ -38,12 +47,44 @@ export interface Exam {
   notes: string | null
   started_at: string | null
   access_password: string | null
+  stop_password?: string | null
+  stopped_at?: string | null
   negative_marking: boolean
+  /** Candidates can look their result up on the public Results page. */
+  result_enabled?: boolean
+  /** ...and download the PDF with all questions and their answers. */
+  result_pdf_enabled?: boolean
+  submit_button_after_minutes?: number
   seat_number_required: boolean
+  show_photo_signature?: boolean
   logo_url: string | null
+  desk_user_id?: string
+  desk_logins?: { userId: string; centreId: number | null; centreName: string | null; centreCode: string | null }[]
+  desk_centre?: { id: number; name: string; code: string } | null
+  registered_exam_id?: number | null
+  slots?: { id: number; exam_date: string; start_time: string; desk_state?: "not_open" | "open" | "closed"; desk_opens_at?: string | null; desk_closes_at?: string | null }[]
+  verification_open_minutes?: number | null
+  live_photo_capture?: boolean
+  verification_close_minutes?: number | null
+  desk_closed?: boolean
+}
+
+export interface RegisteredExam {
+  id: number
+  name: string
+  student_count: number
+  scheduled_exam_id: number | null
+  created_at: string
 }
 
 export interface Student {
+  disallow_reason?: string | null
+  seat_number?: string | null
+  has_reappear?: boolean
+  marked_absent?: boolean
+  application_id?: string | null
+  registered_exam_id?: number | null
+  registered_exam_name?: string | null
   id: number
   roll_number: string | null
   student_code: string | null
@@ -63,6 +104,9 @@ export interface Student {
   signature_url: string | null
   status: "pending" | "allowed"
   checked_in_at: string | null
+  exam_access_allowed: boolean
+  exam_access_allowed_at: string | null
+  login_at: string | null
   created_at: string
 }
 
@@ -106,6 +150,8 @@ export interface SubjectBreakdown {
 }
 
 export interface ExamResult {
+  exam_date?: string
+  start_time?: string
   id: number
   student_id: number
   exam_id: number
@@ -166,18 +212,31 @@ export interface AttendanceRow {
   id: number
   roll_number: string
   full_name: string
+  gender: string | null
   centre_name: string | null
   standard_name: string | null
-  checked_in_at: string | null
+  checked_in_at?: string | null
+  access_at?: string | null
+  seat_number?: string | null
+  lab_name?: string | null
+  absent?: boolean
+  remarks?: string
+  action?: string | null
+  login_at?: string | null
+  /** When the candidate selected + submitted this roll number on the login page. */
+  roll_selected_at?: string | null
+  can_reenable?: boolean
   started_at: string | null
   submitted_at: string | null
   attempt_status: "in_progress" | "submitted" | null
+  ip_address?: string | null
 }
 
 export interface MonitorCandidate {
   id: number
   roll_number: string
   full_name: string
+  gender: string | null
   centre_name: string | null
   standard_name: string | null
   checked_in_at: string
@@ -188,6 +247,7 @@ export interface MonitorCandidate {
   submit_reason: "manual" | "timeout" | "tab_switch" | "devtools" | "fullscreen_exit" | null
   answered_count: number
   ip_address: string | null
+  seat_number?: string | null
 }
 
 export interface MonitorData {
@@ -201,6 +261,18 @@ export interface MonitorData {
     status: string
   }
   candidates: MonitorCandidate[]
+  centres?: { name: string; code: string; city: string | null; address: string | null; capacity: number }[]
+}
+
+export interface SeatingSummary {
+  exam: { id: number; name: string }
+  labs: { id: number; lab_name: string; capacity: number; centre_id: number; centre_name: string; centre_code: string }[]
+  candidates: { ticket_id: number; seat_number: string | null; student_id: number; roll_number: string; full_name: string; centre_name: string | null }[]
+  totalCapacity: number
+  totalCandidates: number
+  assignedCount: number
+  fitsCapacity: boolean
+  verified: boolean
 }
 
 export interface QuestionDifficulty {

@@ -179,7 +179,7 @@ export default function GenerateHallTickets() {
       <Card>
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-3">
           <CardTitle className="text-base">Registered Students ({filtered.length})</CardTitle>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
               size="sm"
@@ -191,7 +191,7 @@ export default function GenerateHallTickets() {
                 ? "Deselect All"
                 : `Bulk Select All (${filtered.length})`}
             </Button>
-            <div className="relative w-64">
+            <div className="relative w-full sm:w-64">
               <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input placeholder="Search name or email..." className="pl-8" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>

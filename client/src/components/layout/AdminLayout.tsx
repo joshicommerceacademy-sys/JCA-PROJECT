@@ -1,9 +1,7 @@
 import * as React from "react"
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
 import {
-  LayoutDashboard, Users, ShieldCheck, Building2, GraduationCap,
-  CalendarClock, BookOpen, Trophy, Ticket, TicketPlus, LogOut, Menu, ClipboardCheck, RotateCcw, Radio, BarChart3,
-  Settings,
+  LayoutDashboard, Building2, GraduationCap, CalendarClock, BookOpen, FileBarChart, LogOut, Menu, RotateCcw, Settings,
 } from "lucide-react"
 import { useAdminAuth } from "@/context/AdminAuthContext"
 import { cn } from "@/lib/utils"
@@ -16,20 +14,15 @@ import jcaBadge from "@/assets/jca-badge.png"
 
 const navItems = [
   { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/admin/students", label: "Students", icon: Users },
-  { to: "/admin/verification", label: "Verification", icon: ShieldCheck },
   { to: "/admin/centres", label: "Centres", icon: Building2 },
   { to: "/admin/standards", label: "Standards", icon: GraduationCap },
   { to: "/admin/exams", label: "Exam Schedule", icon: CalendarClock },
   { to: "/admin/questions", label: "Question Bank", icon: BookOpen },
-  { to: "/admin/results", label: "Results", icon: Trophy },
-  { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
-  { to: "/admin/generate-hall-tickets", label: "Generate Hall Tickets", icon: TicketPlus },
-  { to: "/admin/hall-tickets", label: "Hall Tickets", icon: Ticket },
-  { to: "/admin/attendance", label: "Attendance", icon: ClipboardCheck },
-  { to: "/admin/live-monitor", label: "Live Monitor", icon: Radio },
+  { to: "/admin/reports", label: "Reports", icon: FileBarChart },
+
   { to: "/admin/reappear", label: "Reappear", icon: RotateCcw },
   { to: "/admin/settings", label: "Settings", icon: Settings },
+
 ]
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
@@ -75,7 +68,7 @@ export function AdminLayout() {
     .toUpperCase()
 
   return (
-    <div className="flex min-h-svh bg-muted/30">
+    <div className="flex min-h-svh bg-background">
       <aside className="hidden w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground lg:flex">
         <div className="flex items-center gap-2 px-5 py-5">
           <img src={jcaBadge} alt="Joshi's Commerce Academy" className="size-9" />

@@ -12,7 +12,7 @@ router.use(requireAdmin);
 
 const SELECT_RESULT = `
     SELECT ea.*, st.roll_number, st.full_name AS student_name, st.email, st.centre_id, c.name AS centre_name,
-           st.standard_id, s.name AS standard_name, st.photo_url, e.name AS exam_name
+           st.standard_id, s.name AS standard_name, st.photo_url, e.name AS exam_name, e.logo_url AS exam_logo_url, e.exam_date, e.start_time
     FROM exam_attempts ea
     JOIN students st ON st.id = ea.student_id
     JOIN exams e ON e.id = ea.exam_id
@@ -49,13 +49,18 @@ function resultEmailHtml({ studentName, examName, percentage }) {
 router.get(
     "/",
     asyncHandler(async (req, res) => {
-        const { examId, centreId, resultStatus, search } = req.query;
+        const { examId, examIds, centreId, resultStatus, search } = req.query;
         const clauses = [];
         const params = [];
 
         if (examId) {
             params.push(examId);
             clauses.push(`ea.exam_id = $${params.length}`);
+        }
+        if (examIds) {
+            const ids = String(examIds).split(",").map(Number).filter(Number.isFinite);
+            params.push(ids);
+            clauses.push(`ea.exam_id = ANY($${params.length}::int[])`);
         }
         if (centreId) {
             params.push(centreId);
@@ -177,6 +182,34 @@ router.post(
                     error,
                 })),
             },
+        });
+    })
+);
+
+// Release / withhold an exam's results on the public Results page. Applies to every batch of the
+// exam in one go (the Results page groups batches under one exam name).
+//   enabled     - candidates can look their result up (marks, total marks, pass / fail)
+//   includePdf  - also offer "Download PDF" (all questions with the candidate's answers)
+router.post(
+    "/exam-visibility",
+    asyncHandler(async (req, res) => {
+        const { examIds, enabled, includePdf } = req.body;
+        if (!Array.isArray(examIds) || examIds.length === 0) {
+            throw new ApiError(400, "examIds must be a non-empty array.");
+        }
+        const ids = examIds.map(Number).filter(Number.isFinite);
+        const on = enabled === true;
+        const pdf = on && includePdf === true;
+        const updated = await query(
+            `UPDATE exams SET result_enabled = $2, result_pdf_enabled = $3, updated_at = now()
+             WHERE id = ANY($1::int[]) RETURNING id`,
+            [ids, on, pdf]
+        );
+        if (!updated.length) throw new ApiError(404, "Exam not found.");
+        res.json({
+            status: "success",
+            message: on ? "Result enabled for candidates." : "Result disabled.",
+            data: { examIds: updated.map((r) => r.id), enabled: on, includePdf: pdf },
         });
     })
 );

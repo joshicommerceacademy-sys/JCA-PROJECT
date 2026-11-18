@@ -20,22 +20,33 @@ router.get(
         if (!exam) throw new ApiError(404, "Exam not found.");
 
         const candidates = await query(
-            `SELECT st.id, st.roll_number, st.full_name, c.name AS centre_name, s.name AS standard_name,
+            `SELECT st.id, st.roll_number, st.full_name, st.gender, c.name AS centre_name, s.name AS standard_name,
                     st.checked_in_at, ea.started_at, ea.ends_at, ea.status AS attempt_status,
-                    ea.submitted_at, ea.submit_reason, ea.ip_address,
+                    ea.submitted_at, ea.submit_reason, ea.ip_address, ht.seat_number,
                     (SELECT COUNT(*) FROM exam_attempt_answers a WHERE a.attempt_id = ea.id) AS answered_count
              FROM students st
              LEFT JOIN centres c ON c.id = st.centre_id
              LEFT JOIN standards s ON s.id = st.standard_id
              LEFT JOIN exam_attempts ea ON ea.student_id = st.id AND ea.exam_id = st.exam_id
+             LEFT JOIN hall_tickets ht ON ht.student_id = st.id AND ht.exam_id = st.exam_id
              WHERE st.status = 'allowed' AND st.exam_id = $1
              ORDER BY st.roll_number`,
             [examId]
         );
 
+        const centres = await query(
+            `SELECT c.name, c.code, c.city, c.address,
+                    COALESCE((SELECT SUM(l.capacity) FROM centre_labs l WHERE l.centre_id = c.id), 0)::int AS capacity
+             FROM centres c
+             WHERE c.id IN (SELECT centre_id FROM exam_centres WHERE exam_id = $1 UNION SELECT $2::int)
+             ORDER BY c.name`,
+            [examId, exam.centre_id]
+        );
+
         res.json({
             status: "success",
             data: {
+                centres,
                 exam: {
                     id: exam.id,
                     name: exam.name,

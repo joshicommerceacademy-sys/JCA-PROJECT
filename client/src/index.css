@@ -5,7 +5,7 @@
 
 :root {
   --radius: 0.65rem;
-  --background: #F2F2F3;
+  --background: #F1F2F4; /* faint silver - same as the PDF pages */
   --foreground: #1A1A1A;
   --card: #FFFFFF;
   --card-foreground: #1A1A1A;
@@ -13,15 +13,15 @@
   --popover-foreground: #1A1A1A;
   --primary: #8E4A5A;
   --primary-foreground: #FFFFFF;
-  --secondary: #ECECEE;
+  --secondary: #E6E8EB;
   --secondary-foreground: #1A1A1A;
-  --muted: #ECECEE;
+  --muted: #E6E8EB;
   --muted-foreground: #6B6B6E;
   --accent: #F3E4E7;
   --accent-foreground: #5A2E38;
   --destructive: oklch(0.58 0.22 27);
-  --border: #E1E1E3;
-  --input: #E1E1E3;
+  --border: #D9DCE0;
+  --input: #D9DCE0;
   --ring: #8E4A5A;
   --chart-1: oklch(0.55 0.18 265);
   --chart-2: oklch(0.65 0.15 200);

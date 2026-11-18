@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
+const { loadImageBuffer } = require("./studentFiles");
 
 function resolvePhotoPath(photoUrl) {
     if (!photoUrl) return null;
@@ -8,7 +9,35 @@ function resolvePhotoPath(photoUrl) {
     return fs.existsSync(filePath) ? filePath : null;
 }
 
-async function buildResultPdf(result, answers = []) {
+const DEFAULT_LOGO = path.join(__dirname, "..", "assets", "jca-logo.png");
+
+// Exam logo (falls back to the academy logo) used as a faint background watermark.
+async function loadWatermark(result) {
+    try {
+        const buf = await loadImageBuffer(result.exam_logo_url);
+        if (buf) return buf;
+    } catch (_e) { /* fall through to default */ }
+    return fs.existsSync(DEFAULT_LOGO) ? fs.readFileSync(DEFAULT_LOGO) : null;
+}
+
+function drawWatermark(doc, logo) {
+    const { width, height } = doc.page;
+    doc.save();
+    try {
+        if (logo) {
+            const size = 300;
+            doc.opacity(0.08);
+            doc.image(logo, (width - size) / 2, (height - size) / 2 - 40, { fit: [size, size], align: "center", valign: "center" });
+        }
+        doc.opacity(0.1).fillColor("#000000").font("Helvetica-Bold").fontSize(14)
+            .text("© Joshi's Commerce Academy - Copyright Protected", 0, height / 2 + 140, { width, align: "center", lineBreak: false });
+    } catch (_e) { /* an unsupported logo format must not break the PDF */ }
+    doc.restore();
+}
+
+async function buildResultPdf(result, answers = [], options = {}) {
+    const photoBuffer = await loadImageBuffer(result.photo_url);
+    const watermark = await loadWatermark(result);
     return new Promise((resolve, reject) => {
         const doc = new PDFDocument({ size: "A4", margin: 40 });
 
@@ -16,6 +45,8 @@ async function buildResultPdf(result, answers = []) {
         doc.on("data", (chunk) => buffers.push(chunk));
         doc.on("end", () => resolve(Buffer.concat(buffers)));
         doc.on("error", reject);
+        doc.on("pageAdded", () => drawWatermark(doc, watermark));
+        drawWatermark(doc, watermark);
 
         doc.rect(40, 40, doc.page.width - 80, doc.page.height - 80).stroke("#cccccc");
 
@@ -35,7 +66,7 @@ async function buildResultPdf(result, answers = []) {
             ["Standard", result.standard_name || "—"],
             ["Centre", result.centre_name || "—"],
             ["Exam", result.exam_name],
-            ["Submitted On", new Date(result.submitted_at).toLocaleString()],
+            ...(options.hideTimes ? [] : [["Submitted On", new Date(result.submitted_at).toLocaleString()]]),
         ];
 
         doc.fontSize(11);
@@ -48,7 +79,7 @@ async function buildResultPdf(result, answers = []) {
         const photoBoxX = doc.page.width - 190;
         const photoBoxY = 145;
         const photoSize = 110;
-        const photoPath = resolvePhotoPath(result.photo_url);
+        const photoPath = photoBuffer;
         doc.rect(photoBoxX, photoBoxY, photoSize, photoSize).stroke("#999999");
         if (photoPath) {
             doc.image(photoPath, photoBoxX + 2, photoBoxY + 2, { width: photoSize - 4, height: photoSize - 4 });

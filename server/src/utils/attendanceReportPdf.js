@@ -1,17 +1,22 @@
 const PDFDocument = require("pdfkit");
+const { applyPdfBrand, applyWatermark, loadExamLogo } = require("./pdfBrand");
 
 // Same visual pattern as attendanceSheetPdf.js, but filled with the actual attendance data
 // (access-granted / login / submit timestamps, all down to the second) instead of being a
 // blank sheet for manual marking — this is the admin-triggered "Attendance Report" the user
 // downloads once an exam has run, not the pre-exam blank signature sheet.
-const COLS = [
-    { key: "sno", label: "S.No", width: 32 },
-    { key: "rollNumber", label: "Roll Number", width: 75 },
-    { key: "fullName", label: "Candidate Name", width: 100 },
-    { key: "accessGranted", label: "Access Granted", width: 105 },
-    { key: "loginTime", label: "Login Time", width: 105 },
-    { key: "submitTime", label: "Submit Time", width: 100 },
-];
+function getCols() {
+    return [
+        { key: "sno", label: "S.No", width: 28 },
+        { key: "rollNumber", label: "Roll Number", width: 62 },
+        { key: "fullName", label: "Candidate Name", width: 100 },
+        { key: "accessGranted", label: "Access Granted", width: 98 },
+        { key: "loginTime", label: "Login Time", width: 98 },
+        { key: "submitTime", label: "Submit Time", width: 98 },
+        { key: "remarks", label: "Remarks", width: 178 },
+        { key: "action", label: "Action", width: 100 },
+    ];
+}
 
 function formatTimestamp(value) {
     if (!value) return "—";
@@ -21,7 +26,7 @@ function formatTimestamp(value) {
     });
 }
 
-function drawTableHeader(doc, x, y) {
+function drawTableHeader(doc, x, y, COLS) {
     let cx = x;
     doc.font("Helvetica-Bold").fontSize(8);
     for (const col of COLS) {
@@ -32,7 +37,7 @@ function drawTableHeader(doc, x, y) {
     return y + 22;
 }
 
-function drawRow(doc, x, y, rowHeight, values) {
+function drawRow(doc, x, y, rowHeight, values, COLS) {
     let cx = x;
     doc.font("Helvetica").fontSize(8);
     for (const col of COLS) {
@@ -42,13 +47,17 @@ function drawRow(doc, x, y, rowHeight, values) {
     }
 }
 
-function buildAttendanceReportPdf(exam, rows) {
+async function buildAttendanceReportPdf(exam, rows) {
+    const COLS = getCols();
+    const logo = await loadExamLogo(exam);
     return new Promise((resolve, reject) => {
         const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 40 });
         const buffers = [];
         doc.on("data", (chunk) => buffers.push(chunk));
         doc.on("end", () => resolve(Buffer.concat(buffers)));
         doc.on("error", reject);
+        applyPdfBrand(doc, exam.name);
+        applyWatermark(doc, logo);
 
         doc.fontSize(16).font("Helvetica-Bold").text("Joshi's Commerce Academy", { align: "center" });
         doc.fontSize(12).font("Helvetica").text("Exam Attendance Report", { align: "center" });
@@ -62,15 +71,15 @@ function buildAttendanceReportPdf(exam, rows) {
         doc.moveDown(0.8);
 
         const tableX = doc.page.margins.left;
-        const rowHeight = 22;
+        const rowHeight = 30;
         const bottomLimit = doc.page.height - doc.page.margins.bottom;
 
-        let y = drawTableHeader(doc, tableX, doc.y);
+        let y = drawTableHeader(doc, tableX, doc.y, COLS);
 
         rows.forEach((r, i) => {
             if (y + rowHeight > bottomLimit) {
                 doc.addPage();
-                y = drawTableHeader(doc, tableX, doc.page.margins.top);
+                y = drawTableHeader(doc, tableX, doc.page.margins.top, COLS);
             }
             drawRow(doc, tableX, y, rowHeight, {
                 sno: i + 1,
@@ -79,7 +88,9 @@ function buildAttendanceReportPdf(exam, rows) {
                 accessGranted: formatTimestamp(r.checked_in_at),
                 loginTime: formatTimestamp(r.started_at),
                 submitTime: formatTimestamp(r.submitted_at),
-            });
+                remarks: r.remarks || "-",
+                action: r.action || "-",
+            }, COLS);
             y += rowHeight;
         });
 

@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS students (
 -- Record-keeping only — it does NOT gate login; a student can log in as soon as `status` is
 -- 'allowed'.
 ALTER TABLE students ADD COLUMN IF NOT EXISTS checked_in_at TIMESTAMPTZ;
+-- Registration/hall-ticket approval is separate from exam-day access approval.
+ALTER TABLE students ADD COLUMN IF NOT EXISTS exam_access_allowed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS exam_access_allowed_at TIMESTAMPTZ;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS login_at TIMESTAMPTZ;
 ALTER TABLE students ADD COLUMN IF NOT EXISTS signature_url TEXT;
 -- 4-digit internal reference code, assigned the moment a student is selected on the
 -- Generate Hall Ticket page (independent of roll_number).
@@ -149,6 +153,7 @@ CREATE TABLE IF NOT EXISTS exams (
     passing_percentage    NUMERIC(5,2) NOT NULL DEFAULT 40,
     login_window_minutes  INTEGER NOT NULL DEFAULT 30,
     grace_period_minutes  INTEGER NOT NULL DEFAULT 25,
+    submit_button_after_minutes INTEGER NOT NULL DEFAULT 0 CHECK (submit_button_after_minutes BETWEEN 0 AND 300),
     show_provisional_result BOOLEAN NOT NULL DEFAULT true,
     status                VARCHAR(12) NOT NULL DEFAULT 'upcoming'
                           CHECK (status IN ('upcoming', 'ongoing', 'completed', 'cancelled')),
@@ -158,6 +163,7 @@ CREATE TABLE IF NOT EXISTS exams (
 );
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS login_window_minutes INTEGER NOT NULL DEFAULT 30;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS grace_period_minutes INTEGER NOT NULL DEFAULT 25;
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS submit_button_after_minutes INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS show_provisional_result BOOLEAN NOT NULL DEFAULT true;
 -- When true (default), a candidate who logs in during the grace period (i.e. after the scheduled
 -- start time) still gets the exam's full duration counted from their actual login moment, instead
@@ -182,6 +188,14 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS seat_number_required BOOLEAN NOT NULL
 -- Optional per-exam branding, set via a separate upload endpoint after the exam is created.
 -- When null, the student-facing exam page falls back to the academy's default logo.
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS logo_url TEXT;
+
+-- One scheduled exam may be held at multiple centres. centre_id remains the primary/legacy centre.
+CREATE TABLE IF NOT EXISTS exam_centres (
+    exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+    centre_id INTEGER NOT NULL REFERENCES centres(id) ON DELETE CASCADE,
+    PRIMARY KEY (exam_id, centre_id)
+);
+
 
 DO $$
 BEGIN
@@ -259,6 +273,8 @@ CREATE TABLE IF NOT EXISTS exam_attempts (
     UNIQUE (student_id, exam_id)
 );
 ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS result_sent_at TIMESTAMPTZ;
+-- Admin approval: when true, the candidate can view their result PDF from the public Results page.
+ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS result_visible BOOLEAN NOT NULL DEFAULT false;
 -- This student's personal display order (question ids), generated once at attempt
 -- creation and reused on resume so a page refresh never reshuffles mid-exam. Shuffled
 -- independently within each section so section boundaries never move.
@@ -352,3 +368,158 @@ ALTER TABLE app_settings ADD CONSTRAINT app_settings_max_warnings_check CHECK (m
 -- Blocks copy/cut/right-click/drag-out on the exam-taking page. On by default (reproduces
 -- the previously-unconditional behavior).
 ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS disable_copy_enabled BOOLEAN NOT NULL DEFAULT true;
+
+-- ----------------------------------------------------------------
+-- ACTIVITY AUDIT LOGS (interaction metadata; no raw keystrokes or form values)
+-- ----------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS activity_audit_logs (
+    id BIGSERIAL PRIMARY KEY,
+    event_type VARCHAR(24) NOT NULL CHECK (event_type IN ('click','key_action','form_submit','navigation')),
+    page_path TEXT,
+    target_label VARCHAR(180),
+    key_action VARCHAR(40),
+    actor_role VARCHAR(16) NOT NULL DEFAULT 'unknown' CHECK (actor_role IN ('admin','student','unknown')),
+    actor_id INTEGER,
+    ip_address INET,
+    user_agent TEXT,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_activity_audit_logs_occurred_at ON activity_audit_logs (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_audit_logs_type ON activity_audit_logs (event_type);
+
+-- ----------------------------------------------------------------
+-- CENTRE LABS (capacity = max candidates seatable in that lab)
+-- ----------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS centre_labs (
+    id          SERIAL PRIMARY KEY,
+    centre_id   INTEGER NOT NULL REFERENCES centres(id) ON DELETE CASCADE,
+    name        VARCHAR(60) NOT NULL,
+    capacity    INTEGER NOT NULL CHECK (capacity > 0),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (centre_id, name)
+);
+
+-- Lab seats look like "Lab 1-003"; the old S-001 column width is too small for custom lab names.
+ALTER TABLE hall_tickets ALTER COLUMN seat_number TYPE VARCHAR(80);
+
+-- Per-exam switch: show the candidate's photo and signature on the exam page.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS show_photo_signature BOOLEAN NOT NULL DEFAULT false;
+
+-- ----------------------------------------------------------------
+-- REGISTERED EXAMS — exam names an admin registers up front. Students register against one of
+-- these (students.registered_exam_id) before the exam is scheduled; scheduling an exam then
+-- picks a registered name, and the exam appears in the Exam Schedule.
+-- ----------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS registered_exams (
+    id         SERIAL PRIMARY KEY,
+    name       VARCHAR(200) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_registered_exams_name ON registered_exams (lower(name));
+ALTER TABLE students ADD COLUMN IF NOT EXISTS registered_exam_id INTEGER REFERENCES registered_exams(id) ON DELETE SET NULL;
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS registered_exam_id INTEGER REFERENCES registered_exams(id) ON DELETE SET NULL;
+
+-- Candidate photo / signature bytes live in the database (not on disk) so they survive redeploys
+-- on hosts with an ephemeral filesystem. students.photo_url / signature_url point at
+-- /api/files/students/:id/(photo|signature).
+CREATE TABLE IF NOT EXISTS student_files (
+    student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    kind       VARCHAR(12) NOT NULL CHECK (kind IN ('photo', 'signature')),
+    mime       VARCHAR(60) NOT NULL,
+    data       BYTEA NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (student_id, kind)
+);
+
+-- Public application ID shown after registration; used by "Track Your Application".
+ALTER TABLE students ADD COLUMN IF NOT EXISTS application_id VARCHAR(20);
+UPDATE students SET application_id = 'JCA-' || upper(substr(md5(random()::text || id::text), 1, 6)) WHERE application_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_students_application_id ON students (application_id);
+
+-- Seat numbers per lab ("Add Seat Number" on the Centres page). Seats are handed out to
+-- candidates at the Verification Desk when an exam has Seating Arrangement turned on.
+CREATE TABLE IF NOT EXISTS lab_seats (
+    id          SERIAL PRIMARY KEY,
+    lab_id      INTEGER NOT NULL REFERENCES centre_labs(id) ON DELETE CASCADE,
+    seat_number VARCHAR(40) NOT NULL,
+    UNIQUE (lab_id, seat_number)
+);
+ALTER TABLE hall_tickets ADD COLUMN IF NOT EXISTS seat_lab_id INTEGER REFERENCES centre_labs(id) ON DELETE SET NULL;
+-- Per-exam: when on, the Verification Desk opens the camera to capture a live photo on Allow.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_photo_capture BOOLEAN NOT NULL DEFAULT false;
+
+-- Minutes after the exam's start time at which the Verification Desk closes (NULL = never closes).
+-- Once closed, candidates can no longer be Allowed and anyone not Allowed is marked Absent.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS verification_close_minutes INTEGER CHECK (verification_close_minutes IS NULL OR verification_close_minutes >= 0);
+
+-- Why a candidate was Disallowed at the Verification Desk (cleared when they are Allowed again).
+ALTER TABLE students ADD COLUMN IF NOT EXISTS disallow_reason TEXT;
+
+-- One exam may run in several date/time slots. Each slot is its own exams row sharing the name,
+-- password and question paper, so the name is no longer unique.
+ALTER TABLE exams DROP CONSTRAINT IF EXISTS exams_name_key;
+
+-- Minutes before the exam's start time at which the Verification Desk opens (NULL = open from the start).
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS verification_open_minutes INTEGER CHECK (verification_open_minutes IS NULL OR verification_open_minutes >= 0);
+
+-- When an application was approved (students.status became 'allowed'), for "Track Your Application".
+ALTER TABLE students ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+UPDATE students SET verified_at = updated_at WHERE status = 'allowed' AND verified_at IS NULL;
+CREATE OR REPLACE FUNCTION set_student_verified_at() RETURNS trigger AS $$
+BEGIN
+    IF NEW.status = 'allowed' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'allowed') THEN
+        NEW.verified_at := now();
+    ELSIF NEW.status <> 'allowed' THEN
+        NEW.verified_at := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_student_verified_at ON students;
+CREATE TRIGGER trg_student_verified_at BEFORE INSERT OR UPDATE OF status ON students
+    FOR EACH ROW EXECUTE FUNCTION set_student_verified_at();
+
+-- Stop Exam: a password (generated when the exam is started) the admin must enter to end the exam for everyone.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS stop_password VARCHAR(10);
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS stopped_at TIMESTAMPTZ;
+
+-- Exams started before the Stop Exam feature existed have no stop password; give them one.
+UPDATE exams SET stop_password = lpad((100000 + floor(random() * 900000))::int::text, 6, '0')
+WHERE started_at IS NOT NULL AND stopped_at IS NULL AND stop_password IS NULL;
+
+-- Exam status is automatic now: Running once started, Completed once stopped.
+UPDATE exams SET status = 'completed' WHERE stopped_at IS NOT NULL AND status NOT IN ('completed', 'cancelled');
+UPDATE exams SET status = 'ongoing' WHERE started_at IS NOT NULL AND stopped_at IS NULL AND status = 'upcoming';
+
+-- ----------------------------------------------------------------
+-- RESULT RELEASE (per exam, replaces the old per-candidate result_visible switch)
+--   result_enabled      - candidates can look their result up on the public Results page
+--   result_pdf_enabled  - the "Download PDF" (all questions + answers) button is offered there
+-- Existing exams that already had approved results stay enabled (one-time, guarded so that a
+-- later migrate never re-enables an exam the admin has disabled).
+-- ----------------------------------------------------------------
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'exams' AND column_name = 'result_enabled') THEN
+        ALTER TABLE exams ADD COLUMN result_enabled BOOLEAN NOT NULL DEFAULT false;
+        ALTER TABLE exams ADD COLUMN result_pdf_enabled BOOLEAN NOT NULL DEFAULT false;
+        UPDATE exams SET result_enabled = true, result_pdf_enabled = true
+        WHERE id IN (SELECT DISTINCT exam_id FROM exam_attempts WHERE result_visible = true);
+    END IF;
+END $$;
+
+-- ----------------------------------------------------------------
+-- ROLL NUMBER CLAIM (one device per roll number at login)
+-- The moment a candidate selects + submits a roll number on the login page it is claimed by that
+-- browser session. Anyone else trying to select it gets "already selected". An admin clears the
+-- claim ("Re-enable") to let the roll number be used again.
+-- ----------------------------------------------------------------
+ALTER TABLE students ADD COLUMN IF NOT EXISTS login_session_id VARCHAR(64);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS login_claimed_at TIMESTAMPTZ;
+
+-- How the attempt ended when the connection was lost / when the device reported in.
+CREATE INDEX IF NOT EXISTS idx_exam_attempts_status_ends ON exam_attempts(status, ends_at);
+
+-- Set by the Verification Desk's "Revoke All" for allowed candidates who never logged in. Shown as
+-- Absent on the Attendance page; cleared when the candidate is allowed again.
+ALTER TABLE students ADD COLUMN IF NOT EXISTS marked_absent BOOLEAN NOT NULL DEFAULT false;

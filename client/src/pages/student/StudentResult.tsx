@@ -8,9 +8,12 @@ import { formatDateTime } from "@/lib/formatDate"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { SelectionBanner } from "@/components/student/SelectionBanner"
+import { useBlockBack } from "@/hooks/useBlockBack"
 import { Skeleton } from "@/components/ui/skeleton"
 
 export default function StudentResult() {
+  useBlockBack()
   const navigate = useNavigate()
   const { logout } = useStudentAuth()
   const { data, isLoading } = useQuery({ queryKey: ["student-result"], queryFn: () => studentApi.getResult() })
@@ -30,7 +33,8 @@ export default function StudentResult() {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center bg-gradient-to-b from-background to-muted/40 p-4">
+    <div className="flex min-h-svh flex-col bg-background"><SelectionBanner />
+    <div className="flex flex-1 items-center justify-center p-4">
       <Card className="w-full max-w-lg">
         <CardHeader className="items-center text-center">
           <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-success/10 text-success">
@@ -115,6 +119,7 @@ export default function StudentResult() {
           <Button onClick={handleBackToLogin}>Back to Login</Button>
         </CardContent>
       </Card>
+    </div>
     </div>
   )
 }

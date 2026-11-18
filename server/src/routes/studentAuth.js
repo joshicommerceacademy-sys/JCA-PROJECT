@@ -3,8 +3,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { query, pool } = require("../db/pool");
 const { asyncHandler, ApiError } = require("../utils/asyncHandler");
-const { canLoginNow, isSelectableForLogin } = require("../utils/examWindow");
+const { canLoginNow, isSelectableForLogin, getExamWindow } = require("../utils/examWindow");
 const { getSettings } = require("../utils/settings");
+const { claimRoll } = require("../utils/rollClaim");
 
 const router = express.Router();
 
@@ -44,25 +45,45 @@ router.get(
         }
 
         const students = await query(
-            `SELECT st.roll_number, e.id AS exam_id, e.exam_date, e.start_time, e.duration_minutes,
-                    e.login_window_minutes, e.grace_period_minutes, e.started_at, rr.id AS reappear_id
+            `SELECT st.roll_number, sd.name AS standard_name, e.id AS exam_id, e.exam_date, e.start_time, e.duration_minutes,
+                    e.login_window_minutes, e.grace_period_minutes, e.started_at, rr.id AS reappear_id,
+                    ea.id AS attempt_id
              FROM students st
              JOIN exams e ON e.id = st.exam_id
+             LEFT JOIN standards sd ON sd.id = st.standard_id
              LEFT JOIN exam_attempts ea ON ea.student_id = st.id AND ea.exam_id = e.id
              LEFT JOIN reappear_requests rr ON rr.student_id = st.id AND rr.exam_id = e.id AND rr.status = 'pending'
-             WHERE st.status = 'allowed'
-                   AND e.status != 'cancelled'
-                   AND (ea.id IS NULL OR ea.status != 'submitted')
+             WHERE st.status = 'allowed' AND st.exam_access_allowed = true
+                   AND e.status != 'cancelled' AND e.stopped_at IS NULL
                    ${examClause}`,
             params
         );
 
+        // A roll number whose exam has already been started (an attempt exists - still running or
+        // submitted) is no longer offered for login. It only comes back when an admin re-enables
+        // it (a pending reappear), which is the one case that lets a started attempt be resumed.
         const eligible = students
-            .filter((s) => s.reappear_id || isSelectableForLogin(s))
-            .map((s) => ({ rollNumber: s.roll_number }))
+            .filter((s) => s.reappear_id || (!s.attempt_id && isSelectableForLogin(s)))
+            .map((s) => ({ rollNumber: s.roll_number, standardName: s.standard_name || null }))
             .sort((a, b) => a.rollNumber.localeCompare(b.rollNumber));
 
         res.json({ status: "success", data: eligible });
+    })
+);
+
+// Public: the candidate's name for the welcome message, shown after they submit their roll number.
+router.get(
+    "/candidate-name",
+    asyncHandler(async (req, res) => {
+        const { examId, rollNumber } = req.query;
+        if (!examId || !rollNumber) throw new ApiError(400, "examId and rollNumber are required.");
+        const [row] = await query(
+            `SELECT full_name FROM students
+             WHERE roll_number = $1 AND exam_id = $2 AND status = 'allowed' AND exam_access_allowed = true`,
+            [rollNumber, examId]
+        );
+        if (!row) throw new ApiError(404, "Roll number not found for this exam.");
+        res.json({ status: "success", data: { fullName: row.full_name } });
     })
 );
 
@@ -77,38 +98,98 @@ router.get(
 router.get(
     "/exams",
     asyncHandler(async (req, res) => {
+        // An exam shows up here from its scheduled start time (or the moment an admin clicks
+        // Start Exam, if earlier) until 1 hour after it ends — independent of whether any student
+        // has been granted exam access yet. A pending reappear keeps its exam listed regardless.
         const rows = await query(`
-            SELECT e.id, e.name, e.exam_date, e.start_time, e.duration_minutes,
-                   e.login_window_minutes, e.grace_period_minutes, e.started_at, rr.id AS reappear_id,
-                   c.name AS centre_name, c.city AS centre_city
+            SELECT e.id, e.name, e.exam_date, e.start_time, e.duration_minutes, e.started_at, e.registered_exam_id,
+                   e.login_window_minutes, e.grace_period_minutes, e.submit_button_after_minutes, e.compensate_late_login,
+                   EXISTS (SELECT 1 FROM reappear_requests rr WHERE rr.exam_id = e.id AND rr.status = 'pending') AS has_reappear,
+                   COALESCE((SELECT string_agg(DISTINCT c2.name, ' / ' ORDER BY c2.name) FROM exam_centres ec JOIN centres c2 ON c2.id = ec.centre_id WHERE ec.exam_id = e.id), c.name) AS centre_name,
+                   c.city AS centre_city, e.logo_url
             FROM exams e
-            JOIN students st ON st.exam_id = e.id
-            LEFT JOIN exam_attempts ea ON ea.student_id = st.id AND ea.exam_id = e.id
-            LEFT JOIN reappear_requests rr ON rr.student_id = st.id AND rr.exam_id = e.id AND rr.status = 'pending'
             LEFT JOIN centres c ON c.id = e.centre_id
-            WHERE st.status = 'allowed'
-                  AND e.status != 'cancelled'
-                  AND (ea.id IS NULL OR ea.status != 'submitted')
+            WHERE e.status != 'cancelled' AND e.stopped_at IS NULL
         `);
 
-        const examsById = new Map();
-        for (const row of rows) {
-            if (!row.reappear_id && !isSelectableForLogin(row)) continue;
-            if (!examsById.has(row.id)) {
-                examsById.set(row.id, {
-                    id: row.id,
-                    name: row.name,
-                    examDate: row.exam_date,
-                    startTime: row.start_time,
-                    durationMinutes: row.duration_minutes,
-                    centreName: row.centre_name,
-                    centreCity: row.centre_city,
-                });
-            }
+        const now = new Date();
+        const visibleMs = 60 * 60000;
+        // An exam with several batches is listed once; only the time changes per batch, so keep the
+        // batch that is live (earliest start among the visible ones) for each exam.
+        const visibleRows = rows
+            .filter((row) => {
+                if (row.has_reappear) return true;
+                const { start, examEnd } = getExamWindow(row);
+                const shownFrom = row.started_at && new Date(row.started_at) < start ? new Date(row.started_at) : start;
+                return now >= shownFrom && now <= new Date(examEnd.getTime() + visibleMs);
+            });
+        const oneBatchPerExam = new Map();
+        for (const row of visibleRows) {
+            const key = row.registered_exam_id ? `r${row.registered_exam_id}` : `n${row.name.toLowerCase()}`;
+            const current = oneBatchPerExam.get(key);
+            if (!current || getExamWindow(row).start < getExamWindow(current).start) oneBatchPerExam.set(key, row);
+        }
+        const exams = [...oneBatchPerExam.values()]
+            .map((row) => ({
+                id: row.id,
+                name: row.name,
+                examDate: row.exam_date,
+                startTime: row.start_time,
+                durationMinutes: row.duration_minutes,
+                submitButtonAfterMinutes: Number(row.submit_button_after_minutes || 0),
+                compensateLateLogin: row.compensate_late_login !== false,
+                centreName: row.centre_name,
+                centreCity: row.centre_city,
+                logoUrl: row.logo_url || null,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        res.json({ status: "success", data: exams });
+    })
+);
+
+// Public: the candidate picked a roll number and pressed Submit. Claims it for this browser
+// session so it appears on the Attendance page at once and nobody else can select it. A second
+// person submitting the same roll number gets a 409 (the login page shows the "already selected"
+// pop-up).
+router.post(
+    "/claim",
+    asyncHandler(async (req, res) => {
+        const { examId, rollNumber, sessionId } = req.body || {};
+        if (!examId || !rollNumber) throw new ApiError(400, "examId and rollNumber are required.");
+
+        const [student] = await query(
+            `SELECT * FROM students
+             WHERE upper(roll_number) = upper($1) AND exam_id = $2 AND status = 'allowed' AND exam_access_allowed = true`,
+            [String(rollNumber).trim(), examId]
+        );
+        if (!student) throw new ApiError(404, "Roll number not found for this exam.");
+
+        const exam = await loadExamForLogin(student);
+        const [pendingReappear] = await query(
+            "SELECT id FROM reappear_requests WHERE student_id = $1 AND exam_id = $2 AND status = 'pending'",
+            [student.id, exam.id]
+        );
+        if (!pendingReappear && !isSelectableForLogin(exam)) {
+            throw new ApiError(403, "Login for this exam is not open right now.");
         }
 
-        const exams = [...examsById.values()].sort((a, b) => a.name.localeCompare(b.name));
-        res.json({ status: "success", data: exams });
+        const claimedAt = await claimRoll(student, exam, sessionId);
+        res.json({ status: "success", data: { rollNumber: student.roll_number, claimedAt } });
+    })
+);
+
+// Public: whether an exam has a question bank linked (any frozen questions). The password page
+// shows "Question Bank Not Active" when it doesn't — nothing else in the student flow exposes this.
+router.get(
+    "/exam-status",
+    asyncHandler(async (req, res) => {
+        const { examId } = req.query;
+        if (!examId) throw new ApiError(400, "examId is required.");
+        const [row] = await query(
+            "SELECT COUNT(*)::int AS n FROM exam_questions WHERE exam_id = $1",
+            [examId]
+        );
+        res.json({ status: "success", data: { questionBankActive: row.n > 0 } });
     })
 );
 
@@ -180,7 +261,7 @@ async function finishLogin(student, exam) {
         [student.id, exam.id]
     );
     if (existingAttempt?.status === "submitted") {
-        throw new ApiError(403, "You have already submitted this exam.");
+        throw new ApiError(403, "You have already submitted this exam. An exam that has already been started and completed cannot be started again.", "EXAM_ALREADY_SUBMITTED");
     }
 
     const [pendingReappear] = await query(
@@ -230,7 +311,10 @@ async function finishLogin(student, exam) {
 
 async function loadExamForLogin(student) {
     if (student.status !== "allowed") {
-        throw new ApiError(403, "Your exam access has not been approved by the admin yet.");
+        throw new ApiError(403, "Your hall-ticket registration has not been verified yet.");
+    }
+    if (!student.exam_access_allowed) {
+        throw new ApiError(403, "Your exam access has not been allowed by the admin yet.");
     }
     if (!student.exam_id) {
         throw new ApiError(400, "No exam has been assigned to you yet.");
@@ -238,6 +322,9 @@ async function loadExamForLogin(student) {
     const [exam] = await query("SELECT * FROM exams WHERE id = $1", [student.exam_id]);
     if (!exam) {
         throw new ApiError(400, "Your assigned exam could not be found.");
+    }
+    if (exam.stopped_at) {
+        throw new ApiError(403, "This exam has been stopped by the administrator.");
     }
     if (exam.status === "cancelled") {
         throw new ApiError(400, "This exam has been cancelled.");
@@ -251,7 +338,7 @@ async function loadExamForLogin(student) {
 router.post(
     "/",
     asyncHandler(async (req, res) => {
-        const { rollNumber, password } = req.body;
+        const { rollNumber, password, sessionId } = req.body;
         if (!rollNumber || !password) {
             throw new ApiError(400, "Roll number and password are required.");
         }
@@ -270,7 +357,10 @@ router.post(
         }
 
         const exam = await loadExamForLogin(student);
+        // The roll number must belong to this browser session (claimed on the previous step).
+        await claimRoll(student, exam, sessionId);
         const token = await finishLogin(student, exam);
+        await query("UPDATE students SET login_at = now(), updated_at = now() WHERE id = $1", [student.id]);
 
         res.json({
             status: "success",

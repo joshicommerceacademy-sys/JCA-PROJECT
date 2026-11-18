@@ -4,6 +4,9 @@ const PDFDocument = require("pdfkit");
 const QRCode = require("qrcode");
 const { formatDobPassword } = require("./idGenerators");
 const { studentLoginLink } = require("./links");
+const { loadImageBuffer } = require("./studentFiles");
+
+const LOGO_PATH = path.join(__dirname, "..", "assets", "jca-logo.png");
 
 function resolveUploadPath(url) {
     if (!url) return null;
@@ -45,6 +48,8 @@ async function buildHallTicketPdf(ticket) {
     });
     const qrDataUrl = await QRCode.toDataURL(qrPayload, { margin: 0, width: 300 });
     const qrImage = Buffer.from(qrDataUrl.split(",")[1], "base64");
+    const photoBuffer = await loadImageBuffer(ticket.photo_url);
+    const signatureBuffer = await loadImageBuffer(ticket.signature_url);
 
     return new Promise((resolve, reject) => {
         const doc = new PDFDocument({
@@ -60,7 +65,24 @@ async function buildHallTicketPdf(ticket) {
         doc.on("end", () => resolve(Buffer.concat(buffers)));
         doc.on("error", reject);
 
+        // Faint JCA logo watermark behind all content (drawn first so everything sits on top).
+        if (fs.existsSync(LOGO_PATH)) {
+            const wmWidth = doc.page.width - 140;
+            const wmHeight = wmWidth * (781 / 1600);
+            doc.save();
+            doc.opacity(0.07);
+            doc.image(LOGO_PATH, 70, (doc.page.height - wmHeight) / 2, { width: wmWidth });
+            doc.restore();
+        }
+
         doc.rect(40, 40, doc.page.width - 80, doc.page.height - 80).stroke("#cccccc");
+
+        // JCA logo with a copyright mark, top-left of the header.
+        if (fs.existsSync(LOGO_PATH)) {
+            doc.image(LOGO_PATH, 60, 56, { width: 80 });
+            doc.fontSize(9).font("Helvetica").fillColor("#555555").text("©", 142, 58, { lineBreak: false });
+            doc.fillColor("#000000");
+        }
 
         doc.fontSize(18).font("Helvetica-Bold").text("Joshi's Commerce Academy", 0, 70, { align: "center" });
         doc.fontSize(13).font("Helvetica").fillColor("#555555").text("Examination Hall Ticket", { align: "center" });
@@ -82,7 +104,6 @@ async function buildHallTicketPdf(ticket) {
             ["Time", `${ticket.start_time.slice(0, 5)} – ${endTime} (${ticket.duration_minutes} min)`],
             ["Centre", ticket.centre_name || "—"],
             ["City", ticket.centre_city ? `${ticket.centre_city}, ${ticket.centre_address}` : (ticket.centre_address || "—")],
-            ["Seat Number", ticket.seat_number || "Not Assigned"],
             ["Hall Ticket No.", ticket.hall_ticket_number],
         ];
 
@@ -110,7 +131,7 @@ async function buildHallTicketPdf(ticket) {
         const photoBoxX = doc.page.width - 190;
         const photoBoxY = 145;
         const photoSize = 110;
-        const photoPath = resolveUploadPath(ticket.photo_url);
+        const photoPath = photoBuffer;
         doc.rect(photoBoxX, photoBoxY, photoSize, photoSize).stroke("#999999");
         if (photoPath) {
             doc.image(photoPath, photoBoxX + 2, photoBoxY + 2, { width: photoSize - 4, height: photoSize - 4 });
@@ -126,7 +147,7 @@ async function buildHallTicketPdf(ticket) {
         const sigBoxY = photoBoxY + photoSize + 12;
         const sigWidth = photoSize;
         const sigHeight = 55;
-        const signaturePath = resolveUploadPath(ticket.signature_url);
+        const signaturePath = signatureBuffer;
         doc.rect(sigBoxX, sigBoxY, sigWidth, sigHeight).stroke("#999999");
         if (signaturePath) {
             doc.image(signaturePath, sigBoxX + 2, sigBoxY + 2, { fit: [sigWidth - 4, sigHeight - 4], align: "center", valign: "center" });
@@ -187,7 +208,7 @@ async function buildHallTicketPdf(ticket) {
         const footerY = doc.page.height - 90;
         doc.moveTo(60, footerY).lineTo(doc.page.width - 60, footerY).stroke("#cccccc");
         doc.fontSize(8).fillColor("#555555").text(
-            "The attached PDF is password-protected with your date of birth (DDMMYYYY).",
+            "The attached PDF is password-protected with your date of birth (DDMMYYYY).  © Joshi's Commerce Academy",
             60,
             footerY + 10,
             { width: doc.page.width - 120, align: "center" }

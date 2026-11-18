@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 require("dotenv").config();
 const { scheduleExamReminderJob } = require("./jobs/examReminderJob");
+const { scheduleExpiredAttemptJob } = require("./jobs/expiredAttemptJob");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -31,12 +32,16 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/admin/login", require("./routes/adminAuth"));
+app.use("/api/desk/login", require("./routes/deskAuth"));
+app.use("/api/files", require("./routes/files"));
 app.use("/api/student/login", require("./routes/studentAuth"));
+app.use("/api/public", require("./routes/publicRegistration"));
 app.use("/api/admin/centres", require("./routes/centres"));
 app.use("/api/admin/standards", require("./routes/standards"));
 app.use("/api/admin/students", require("./routes/students"));
 app.use("/api/admin/question-banks", require("./routes/questionBanks"));
 app.use("/api/admin/questions", require("./routes/questions"));
+app.use("/api/admin/registered-exams", require("./routes/registeredExams"));
 app.use("/api/admin/exams", require("./routes/exams"));
 app.use("/api/admin/results", require("./routes/results"));
 app.use("/api/admin/hall-tickets", require("./routes/hallTickets"));
@@ -88,4 +93,5 @@ app.listen(PORT, "0.0.0.0", () => {
     console.log(`Health:   http://localhost:${PORT}/api/health`);
     console.log("==============================================");
     scheduleExamReminderJob();
+    scheduleExpiredAttemptJob();
 });

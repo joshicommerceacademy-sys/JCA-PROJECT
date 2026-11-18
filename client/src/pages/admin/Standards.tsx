@@ -81,9 +81,9 @@ export default function Standards() {
       </div>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between gap-3">
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-3">
           <CardTitle className="text-base">All Standards</CardTitle>
-          <div className="relative w-64">
+          <div className="relative w-full sm:w-64">
             <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input placeholder="Search standards..." className="pl-8" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>

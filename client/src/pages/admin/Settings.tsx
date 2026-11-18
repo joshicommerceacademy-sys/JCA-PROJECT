@@ -8,7 +8,7 @@ import type { AppSettings } from "@/api/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
+import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 function ToggleRow({
@@ -23,7 +23,7 @@ function ToggleRow({
 }) {
   return (
     <div className="flex items-start gap-2">
-      <Checkbox id={id} className="mt-0.5" checked={checked} disabled={disabled} onCheckedChange={(c) => onCheckedChange(!!c)} />
+      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
       <Label htmlFor={id} className="flex flex-col items-start gap-0.5 font-normal">
         <span className="font-medium text-foreground">{title}</span>
         <span className="text-xs text-muted-foreground">{description}</span>
@@ -86,16 +86,6 @@ export default function Settings() {
           <CardTitle className="flex items-center gap-2 text-base"><Hash className="size-4" /> Exam Security</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <ToggleRow
-            id="seat-number-enabled"
-            checked={!!settings?.seat_number_enabled}
-            disabled={isLoading || updateMutation.isPending}
-            onCheckedChange={(checked) => updateMutation.mutate({ seat_number_enabled: checked })}
-            title="Lab seat number verification"
-            description="When on, Schedule Exam gets an option to require seat numbers for that exam. If required,
-              admins must enter each student's seat number individually on the Verification page before that
-              student can be allowed — bulk approval is disabled for that exam."
-          />
           <ToggleRow
             id="ip-capture-enabled"
             checked={!!settings?.ip_capture_enabled}

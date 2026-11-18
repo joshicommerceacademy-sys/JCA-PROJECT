@@ -2,7 +2,7 @@ import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { AlertTriangle, Clock, ListChecks } from "lucide-react"
+import { AlertTriangle, ListChecks } from "lucide-react"
 import { studentApi } from "@/api/studentApi"
 import { getErrorMessage } from "@/api/client"
 import { useDisableCopy } from "@/hooks/useDisableCopy"
@@ -15,7 +15,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
-import jcaBadge from "@/assets/jca-badge.png"
+import { useBlockBack } from "@/hooks/useBlockBack"
+import { SelectionBanner, saveSelection } from "@/components/student/SelectionBanner"
 
 export default function StudentExamSummary() {
   useDisableCopy()
@@ -23,10 +24,15 @@ export default function StudentExamSummary() {
   const { data, isLoading, error } = useQuery({ queryKey: ["student-instructions"], queryFn: () => studentApi.instructions() })
   const [starting, setStarting] = React.useState(false)
   const [earlyError, setEarlyError] = React.useState<string | null>(null)
+  const [resumeConfirm, setResumeConfirm] = React.useState(false)
 
+  useBlockBack()
   React.useEffect(() => {
     initServerClock()
   }, [])
+  React.useEffect(() => {
+    if (data) saveSelection({ examName: data.exam.name, logoUrl: data.exam.logoUrl ?? null, rollNumber: data.student.rollNumber })
+  }, [data])
 
   async function enterFullscreenAndStart() {
     try {
@@ -34,7 +40,9 @@ export default function StudentExamSummary() {
     } catch {
       // fall through — checked below via document.fullscreenElement
     }
-    if (!document.fullscreenElement) {
+    // Some phone browsers (e.g. iPhone Safari) have no Fullscreen API at all - do not block them.
+    const fullscreenSupported = typeof document.documentElement.requestFullscreen === "function"
+    if (fullscreenSupported && !document.fullscreenElement) {
       toast.error("Fullscreen is required to start the exam. Please allow fullscreen and try again.")
       setStarting(false)
       return
@@ -46,7 +54,14 @@ export default function StudentExamSummary() {
     if (!data) return
     setStarting(true)
 
+    if (data.resuming && !resumeConfirm) {
+      // The exam was already initiated for this candidate — tell them before continuing.
+      setResumeConfirm(true)
+      setStarting(false)
+      return
+    }
     if (data.resuming) {
+      setResumeConfirm(false)
       await enterFullscreenAndStart()
       return
     }
@@ -86,30 +101,17 @@ export default function StudentExamSummary() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col bg-background select-none no-callout">
-      <div className="flex flex-col items-center gap-6 bg-muted/30 p-4 py-10">
-        <div className="flex items-center gap-2">
-          <img src={jcaBadge} alt="Joshi's Commerce Academy" className="size-8" />
-          <span className="font-semibold text-foreground">Joshi's Commerce Academy</span>
-        </div>
-
+    <div className="flex min-h-svh flex-col bg-background select-none no-callout"><SelectionBanner />
+      <div className="flex flex-col items-center gap-6 bg-background p-4 py-10">
         <Card className="w-full max-w-2xl">
           <CardHeader>
             <CardTitle className="text-2xl">{data.exam.name}</CardTitle>
-            <p className="text-sm text-muted-foreground">{formatDate(data.exam.examDate)} · {data.exam.startTime}</p>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4 text-sm sm:grid-cols-3">
-              <div className="flex items-center gap-2">
-                <Clock className="size-4 text-primary" />
-                <div>
-                  <p className="text-muted-foreground">
-                    {data.resuming ? "Time Remaining" : "Duration"}
-                  </p>
-                  <p className="font-medium">
-                    {data.resuming ? `${data.remainingMinutes} min left` : `${data.exam.durationMinutes} min`}
-                  </p>
-                </div>
+            <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Candidate</p>
+                <p className="font-medium">{data.student.fullName}</p>
               </div>
               <div className="flex items-center gap-2">
                 <ListChecks className="size-4 text-primary" />
@@ -146,6 +148,23 @@ export default function StudentExamSummary() {
           {data.resuming ? "Resume Exam" : "Start Exam"}
         </Button>
       </div>
+
+      <Dialog open={resumeConfirm} onOpenChange={setResumeConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-5 text-destructive" /> Exam Already Started
+            </DialogTitle>
+            <DialogDescription>
+              This exam has already been started for you. Your {data.answeredCount ?? 0} saved answer(s) are kept and you have {data.remainingMinutes} min left. Continue to resume it.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResumeConfirm(false)}>Cancel</Button>
+            <Button onClick={handleStart}>Resume Exam</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!earlyError} onOpenChange={(open) => !open && setEarlyError(null)}>
         <DialogContent>

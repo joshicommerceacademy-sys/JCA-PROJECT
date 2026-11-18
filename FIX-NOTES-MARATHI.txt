@@ -1,0 +1,14 @@
+Joshi's Commerce Academy - Fix notes
+
+या ZIP मध्ये केलेले मुख्य दुरुस्त्या:
+1. Server सुरू होण्यापूर्वी server/src/db/schema.sql idempotent migration लागू होते. त्यामुळे exam_centres / exam_center compatibility आणि submit_button_after_minutes सारखे missing schema मुद्दे कमी होतात.
+2. exam_centres चे compatibility views exam_center आणि exam_centers तयार होतात, जर त्या नावे आधीपासून relation नसतील.
+3. Student Registration API मध्ये सार्वजनिक /api/public/exams endpoint जोडला आहे.
+4. Registration API examId validate करून students.exam_id मध्ये जतन करते.
+5. Server routes आणि client TypeScript compile check केले.
+
+महत्त्वाचे:
+- Neon DATABASE_URL Render Environment मध्ये योग्य सेट असणे आवश्यक आहे.
+- पहिल्या startup वेळी database role ला schema/table/sequence create आणि alter करण्याची परवानगी हवी.
+- या वातावरणात प्रत्यक्ष Neon DATABASE_URL उपलब्ध नसल्यामुळे remote database migration किंवा live Render deploy verify केलेले नाही.
+- Render deploy नंतर Logs मध्ये [DB] Schema migrations applied successfully. दिसते का ते तपासा.
