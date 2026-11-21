@@ -31,7 +31,7 @@ router.get(
 
         const rows = await query(
             `SELECT st.id, st.roll_number, st.full_name, c.name AS centre_name, s.name AS standard_name,
-                    st.exam_access_allowed_at AS access_at, st.login_at, st.login_claimed_at AS roll_selected_at, ea.started_at, ea.submitted_at, ea.status AS attempt_status, ea.submit_reason, ea.ip_address, st.exam_access_allowed, st.marked_absent, st.exam_id, e.exam_date, e.start_time,
+                    st.exam_access_allowed_at AS access_at, st.login_at, st.login_claimed_at AS roll_selected_at, ea.started_at, ea.submitted_at, ea.status AS attempt_status, ea.submit_reason, COALESCE(ea.ip_address, st.last_ip) AS ip_address, st.exam_access_allowed, st.marked_absent, st.exam_id, e.exam_date, e.start_time,
                     (SELECT ht.seat_number FROM hall_tickets ht WHERE ht.student_id = st.id AND ht.exam_id = st.exam_id AND ht.status = 'generated' ORDER BY ht.id DESC LIMIT 1) AS seat_number,
                     (SELECT l.name FROM hall_tickets ht JOIN centre_labs l ON l.id = ht.seat_lab_id WHERE ht.student_id = st.id AND ht.exam_id = st.exam_id AND ht.status = 'generated' ORDER BY ht.id DESC LIMIT 1) AS lab_name
              FROM students st

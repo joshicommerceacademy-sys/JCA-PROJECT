@@ -2,11 +2,12 @@ const { query } = require("../db/pool");
 const { sendMail } = require("./mailer");
 const { buildHallTicketPdf } = require("./hallTicketPdf");
 const { studentLoginLink } = require("./links");
+const { fmtDate } = require("./dateFormat");
 
 const SELECT_TICKET_JOIN = `
     SELECT ht.*, st.roll_number, st.full_name AS student_name, st.photo_url, st.signature_url, st.email, st.dob,
            st.standard_id, s.name AS standard_name, e.name AS exam_name,
-           e.exam_date, e.start_time, e.duration_minutes, c.name AS centre_name,
+           e.exam_date, e.start_time, e.duration_minutes, e.password_mode, c.name AS centre_name,
            c.address AS centre_address, c.city AS centre_city
     FROM hall_tickets ht
     JOIN students st ON st.id = ht.student_id
@@ -25,7 +26,7 @@ function hallTicketEmailHtml(ticket) {
         <p>Dear ${ticket.student_name},</p>
         <p>Please find attached your hall ticket for <strong>${ticket.exam_name}</strong>.</p>
         <ul>
-            <li><strong>Date:</strong> ${new Date(ticket.exam_date).toLocaleDateString()}</li>
+            <li><strong>Date:</strong> ${fmtDate(ticket.exam_date)}</li>
             <li><strong>Time:</strong> ${ticket.start_time}</li>
             <li><strong>City:</strong> ${cityLine(ticket)}</li>
             <li><strong>Hall Ticket No.:</strong> ${ticket.hall_ticket_number}</li>

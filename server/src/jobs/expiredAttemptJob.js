@@ -11,7 +11,10 @@ async function finaliseExpiredAttempts() {
     const rows = await query(
         `SELECT ea.* FROM exam_attempts ea
          WHERE ea.status = 'in_progress'
-           AND ea.ends_at < now() - ($1 || ' minutes')::interval`,
+           AND ea.force_stopped_at IS NULL
+           AND ea.ends_at < now() - ($1 || ' minutes')::interval
+           -- a restarted / reappear-pending candidate's time is paused until they log back in
+           AND NOT EXISTS (SELECT 1 FROM reappear_requests rr WHERE rr.student_id = ea.student_id AND rr.exam_id = ea.exam_id AND rr.status = 'pending')`,
         [String(SYNC_GRACE_MINUTES)]
     );
     for (const attempt of rows) {

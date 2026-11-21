@@ -11,6 +11,19 @@ const { generateHallTickets } = require("../utils/hallTicketGenerator");
 const { deskUserId, deskLogins } = require("../utils/deskUser");
 const { submitAttempt } = require("../utils/submitAttempt");
 const { autoAssignSlots } = require("../utils/slots");
+const { logExamEvent } = require("../utils/eventLog");
+const { reapplyExamPasswords } = require("../utils/examPassword");
+const { buildActivityLogPdf, collectActivityRows } = require("../utils/activityLogPdf");
+
+// Exam login password mode: dob (default) | system | own (needs the password the admin typed in).
+function parsePasswordMode(mode, ownPassword) {
+    const m = ["dob", "system", "own"].includes(mode) ? mode : "dob";
+    const own = String(ownPassword || "").trim();
+    if (m === "own" && own.length < 4) {
+        throw new ApiError(400, "Enter the password you want to use (at least 4 characters) for the 'Own password' option.");
+    }
+    return { mode: m, own: m === "own" ? own.slice(0, 40) : null };
+}
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -105,9 +118,9 @@ async function insertSections(client, examId, resolvedSections, sectionList, sta
         if (section.questionIds.length < sectionList[s].questionCount) shortfall = true;
 
         const sectionResult = await client.query(
-            `INSERT INTO exam_sections (exam_id, bank_id, subject_label, question_count, ordinal)
-             VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-            [examId, section.bankId, section.subjectLabel, section.questionIds.length, s + 1]
+            `INSERT INTO exam_sections (exam_id, bank_id, subject_label, question_count, ordinal, manual_pick)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+            [examId, section.bankId, section.subjectLabel, section.questionIds.length, s + 1, Array.isArray(sectionList[s].questionIds) && sectionList[s].questionIds.length > 0]
         );
         const sectionId = sectionResult.rows[0].id;
 
@@ -177,7 +190,7 @@ router.get(
         if (!exam) throw new ApiError(404, "Exam not found.");
 
         const students = await query(
-            `SELECT st.roll_number, st.full_name, ht.seat_number, l.name AS lab_name
+            `SELECT st.roll_number, st.full_name, st.photo_url, st.signature_url, ht.seat_number, l.name AS lab_name
              FROM students st
              LEFT JOIN hall_tickets ht ON ht.student_id = st.id AND ht.exam_id = st.exam_id AND ht.status = 'generated'
              LEFT JOIN centre_labs l ON l.id = ht.seat_lab_id
@@ -192,6 +205,23 @@ router.get(
     })
 );
 
+// Activity Log PDF: built in memory from the exam's records and streamed straight to the browser -
+// nothing is written to disk or stored. Available once the exam batch has been stopped.
+router.get(
+    "/:id/activity-log-pdf",
+    asyncHandler(async (req, res) => {
+        const [exam] = await query(`${SELECT_EXAM} WHERE e.id = $1`, [req.params.id]);
+        if (!exam) throw new ApiError(404, "Exam not found.");
+        if (!exam.stopped_at) throw new ApiError(400, "The activity log is available after the exam batch is stopped.");
+        const rows = await collectActivityRows(exam);
+        const pdfBuffer = await buildActivityLogPdf(exam, rows);
+        res.set("Content-Type", "application/pdf");
+        res.set("Content-Disposition", `attachment; filename="activity-log-${exam.id}.pdf"`);
+        res.set("Cache-Control", "no-store");
+        res.send(pdfBuffer);
+    })
+);
+
 router.post(
     "/",
     asyncHandler(async (req, res) => {
@@ -200,7 +230,9 @@ router.post(
             durationMinutes, sections, passingPercentage, notes,
             loginWindowMinutes, gracePeriodMinutes, submitButtonAfterMinutes, showProvisionalResult, compensateLateLogin,
             negativeMarking, seatNumberRequired, showPhotoSignature, livePhotoCapture, verificationCloseMinutes, verificationOpenMinutes,
+            passwordMode, ownPassword,
         } = req.body;
+        const pw = parsePasswordMode(passwordMode, ownPassword);
 
         // The exam name comes from the registered-exam list when an id is sent.
         let name = rawName;
@@ -271,8 +303,8 @@ router.post(
                 `INSERT INTO exams
                     (name, standard_id, centre_id, exam_date, start_time, duration_minutes,
                      question_count, passing_percentage, notes, login_window_minutes, grace_period_minutes, submit_button_after_minutes,
-                     show_provisional_result, compensate_late_login, negative_marking, seat_number_required, access_password, show_photo_signature, registered_exam_id, live_photo_capture, verification_close_minutes, verification_open_minutes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) RETURNING *`,
+                     show_provisional_result, compensate_late_login, negative_marking, seat_number_required, access_password, show_photo_signature, registered_exam_id, live_photo_capture, verification_close_minutes, verification_open_minutes, password_mode, own_password)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24) RETURNING *`,
                 [
                     name, standardId || null, primaryCentreId, slot.examDate, slot.startTime, durationMinutes,
                     totalQuestionCount, passingPercentage || 40, notes || null,
@@ -285,6 +317,7 @@ router.post(
                     livePhotoCapture === true,
                     parseCloseMinutes(verificationCloseMinutes),
                     parseCloseMinutes(verificationOpenMinutes),
+                    pw.mode, pw.own,
                 ]
             );
             const exam = examResult.rows[0];
@@ -423,6 +456,7 @@ router.put(
                 "UPDATE exams SET started_at = now(), status = 'ongoing', access_password = $1, stop_password = $3, updated_at = now() WHERE id = $2",
                 [password, exam.id, stopPassword]
             );
+            await logExamEvent({ examId: exam.id, type: "exam_started_by_admin", detail: "Exam started by admin" });
         } else if (!exam.stop_password) {
             await query("UPDATE exams SET stop_password = $1 WHERE id = $2", [String(crypto.randomInt(100000, 1000000)), exam.id]);
         }
@@ -451,6 +485,7 @@ router.post(
             await submitAttempt(attempt, exam, "admin_stop");
         }
         await query("UPDATE exams SET status = 'completed', stopped_at = now(), updated_at = now() WHERE id = $1", [exam.id]);
+        await logExamEvent({ examId: exam.id, type: "exam_stopped", detail: `Exam batch stopped by admin (${running.length} running attempt(s) submitted)` });
         res.json({ status: "success", data: { stoppedAttempts: running.length } });
     })
 );
@@ -458,7 +493,8 @@ router.post(
 router.put(
     "/:id",
     asyncHandler(async (req, res) => {
-        const { name, centreId, centreIds, examDate, startTime, durationMinutes, notes, seatNumberRequired, showPhotoSignature, livePhotoCapture, verificationCloseMinutes, verificationOpenMinutes } = req.body;
+        const { name, centreId, centreIds, examDate, startTime, durationMinutes, notes, seatNumberRequired, showPhotoSignature, livePhotoCapture, verificationCloseMinutes, verificationOpenMinutes, passwordMode, ownPassword } = req.body;
+        const pw = parsePasswordMode(passwordMode, ownPassword);
         const selectedCentreIds = Array.isArray(centreIds) && centreIds.length
             ? [...new Set(centreIds.map(Number).filter(Number.isFinite))]
             : [Number(centreId)].filter(Number.isFinite);
@@ -474,9 +510,9 @@ router.put(
             await client.query("BEGIN");
             const updated = await client.query(
                 `UPDATE exams SET name = $1, centre_id = $2, exam_date = $3, start_time = $4,
-                    duration_minutes = $5, notes = $6, seat_number_required = $7, show_photo_signature = $9, live_photo_capture = $10, verification_close_minutes = $11, verification_open_minutes = $12, updated_at = now()
+                    duration_minutes = $5, notes = $6, seat_number_required = $7, show_photo_signature = $9, live_photo_capture = $10, verification_close_minutes = $11, verification_open_minutes = $12, password_mode = $13, own_password = $14, updated_at = now()
                  WHERE id = $8 RETURNING *`,
-                [name, selectedCentreIds[0], examDate, startTime, durationMinutes, notes || null, effectiveSeatNumberRequired, req.params.id, showPhotoSignature === true, livePhotoCapture === true, parseCloseMinutes(verificationCloseMinutes), parseCloseMinutes(verificationOpenMinutes)]
+                [name, selectedCentreIds[0], examDate, startTime, durationMinutes, notes || null, effectiveSeatNumberRequired, req.params.id, showPhotoSignature === true, livePhotoCapture === true, parseCloseMinutes(verificationCloseMinutes), parseCloseMinutes(verificationOpenMinutes), pw.mode, pw.own]
             );
             exam = updated.rows[0];
             if (!exam) throw new ApiError(404, "Exam not found.");
@@ -491,6 +527,8 @@ router.put(
         } finally {
             client.release();
         }
+        // A changed password mode applies to the candidates already holding a hall ticket.
+        await reapplyExamPasswords(exam);
         res.json({ status: "success", data: exam });
     })
 );

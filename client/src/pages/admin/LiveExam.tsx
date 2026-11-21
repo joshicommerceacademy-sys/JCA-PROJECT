@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useNavigate, useParams, Link } from "react-router-dom"
 import { UserRound, CheckCircle2, Timer, Monitor, ArrowLeft, OctagonX } from "lucide-react"
 import { adminApi } from "@/api/adminApi"
-import { formatDate } from "@/lib/formatDate"
+import { formatDate, formatDateTime } from "@/lib/formatDate"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -29,11 +29,13 @@ export default function LiveExam() {
       <div><h1 className="text-2xl font-semibold tracking-tight">Live Exam</h1><p className="text-sm text-muted-foreground">Complete exam data and real-time candidate status</p></div>
       <Button asChild variant="outline"><Link to="/admin/dashboard"><ArrowLeft className="size-4" /> Back to Dashboard</Link></Button>
     </div>
-        <Card><CardHeader><CardTitle className="flex flex-wrap items-center justify-between gap-2"><span>{monitor?.exam.name || "Live Exam Details"}</span><span className="flex flex-wrap items-center gap-2"><Button size="sm" onClick={() => navigate(`/admin/live-monitor?examId=${examId}`)}><Monitor className="size-4" /> Open Full Live Monitor</Button><Button size="sm" variant="destructive" onClick={() => navigate(`/admin/live-exam/${examId}/stop`)}><OctagonX className="size-4" /> Stop Exam</Button></span></CardTitle></CardHeader><CardContent className="flex flex-col gap-4">
+        <Card><CardHeader><CardTitle className="flex flex-wrap items-center justify-between gap-2"><span>{monitor?.exam.name || "Live Exam Details"}</span><span className="flex flex-wrap items-center gap-2"><Button size="sm" onClick={() => navigate(`/admin/live-monitor?examId=${examId}`)}><Monitor className="size-4" /> Open Full Live Monitor</Button><Button size="sm" variant="destructive" onClick={() => navigate(`/admin/live-exam/${examId}/stop`)}><OctagonX className="size-4" /> Stop Exam Batch</Button></span></CardTitle></CardHeader><CardContent className="flex flex-col gap-4">
       {monitorLoading ? <Skeleton className="h-20 w-full" /> : <>
         <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/20 p-4 text-sm md:grid-cols-4">
           <div><p className="text-muted-foreground">Exam</p><p className="font-medium">{monitor?.exam.name}</p></div>
           <div><p className="text-muted-foreground">Date & Time</p><p className="font-medium">{monitor && formatDate(monitor.exam.examDate)} · {monitor?.exam.startTime}</p></div>
+          <div><p className="text-muted-foreground">Venue</p><p className="font-medium">{(monitor?.centres || []).map((c) => c.name).join(" / ") || "—"}</p></div>
+          <div><p className="text-muted-foreground">First candidate started</p><p className="font-medium">{monitor?.exam.firstCandidateStartedAt ? formatDateTime(monitor.exam.firstCandidateStartedAt) : "Not started yet"}</p></div>
           <div><p className="text-muted-foreground">Duration</p><p className="font-medium">{monitor?.exam.durationMinutes} min</p></div>
           <div><p className="text-muted-foreground">Total Questions</p><p className="font-medium">{monitor?.exam.questionCount}</p></div>
           <div className="col-span-2 md:col-span-4"><p className="text-muted-foreground">Centres</p>

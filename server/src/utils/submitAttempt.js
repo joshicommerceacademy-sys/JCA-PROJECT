@@ -1,4 +1,5 @@
 const { query } = require("../db/pool");
+const { getAttemptQuestionIds } = require("./attemptQuestions");
 
 // Scores and closes one in-progress attempt. Used by a candidate's own submit, by the admin's
 // "Stop Exam" (which ends every running attempt at once) and by the expired-attempt sweeper.
@@ -7,9 +8,11 @@ const { query } = require("../db/pool");
 // the candidate's device reconnecting at the same moment the sweeper fires) can never score
 // twice or overwrite each other - the loser simply gets the already-submitted row back.
 async function submitAttempt(attempt, exam, submitReason) {
+    // Scored against the questions this candidate was actually given (seat-wise sets differ per candidate).
+    const questionIds = await getAttemptQuestionIds(attempt);
     const questions = await query(
-        "SELECT q.id, q.correct_answer, q.marks FROM exam_questions eq JOIN questions q ON q.id = eq.question_id WHERE eq.exam_id = $1",
-        [attempt.exam_id]
+        "SELECT id, correct_answer, marks FROM questions WHERE id = ANY($1::int[])",
+        [questionIds]
     );
     const answers = await query(
         "SELECT question_id, selected_option FROM exam_attempt_answers WHERE attempt_id = $1",

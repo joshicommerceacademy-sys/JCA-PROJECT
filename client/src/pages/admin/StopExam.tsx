@@ -66,7 +66,7 @@ export default function StopExam() {
           required
         />
         <Button type="submit" variant="destructive" disabled={stopping || !password.trim()}>
-          <OctagonX className="size-4" /> {stopping ? "Stopping..." : "Stop Exam"}
+          <OctagonX className="size-4" /> {stopping ? "Stopping..." : "Stop Exam Batch"}
         </Button>
         <button type="button" onClick={() => navigate(-1)} className="text-center text-sm text-muted-foreground underline hover:text-foreground">
           Cancel

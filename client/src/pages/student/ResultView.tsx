@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { LinkClosed, usePublicLinkStatus } from "@/components/student/LinkClosed"
 
 interface PublicResult {
   studentName: string
@@ -30,6 +31,7 @@ async function blobErrorMessage(err: unknown): Promise<string> {
 }
 
 export default function ResultView() {
+  const linkStatus = usePublicLinkStatus()
   const { examId } = useParams()
   const location = useLocation()
   const [examName, setExamName] = React.useState<string>((location.state as { name?: string } | null)?.name || "")
@@ -86,6 +88,9 @@ export default function ResultView() {
   }
 
   const passed = result?.resultStatus === "passed"
+  if (linkStatus && !linkStatus.resultEnabled) {
+    return <LinkClosed title="Results are not available" message={linkStatus.resultMessage} />
+  }
 
   return (
     <div className="flex min-h-svh flex-col items-center bg-background p-4">

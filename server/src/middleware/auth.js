@@ -1,4 +1,21 @@
 const jwt = require("jsonwebtoken");
+const { query } = require("../db/pool");
+
+// Marks a Verification Desk sign-in as "seen" (throttled) so Reports > Verification Desk can show
+// Active / Inactive. Failures never affect the request.
+const deskSeen = new Map();
+function touchDeskSession(payload) {
+    if (!payload.userId || !payload.examId) return;
+    const key = `${payload.examId}:${payload.userId}`;
+    const now = Date.now();
+    if (now - (deskSeen.get(key) || 0) < 20000) return;
+    deskSeen.set(key, now);
+    query(
+        `INSERT INTO desk_sessions (exam_id, user_id) VALUES ($1, $2)
+         ON CONFLICT (exam_id, user_id) DO UPDATE SET last_seen_at = now()`,
+        [payload.examId, payload.userId]
+    ).catch(() => {});
+}
 
 function verifyToken(req) {
     const header = req.header("Authorization");
@@ -38,6 +55,7 @@ function requireAdminOrDesk(req, res, next) {
             req.admin = payload;
         } else if (payload.role === "desk") {
             req.desk = payload;
+            touchDeskSession(payload);
         } else {
             return res.status(403).json({ status: "error", message: "Admin or verification desk access required." });
         }

@@ -162,13 +162,20 @@ export default function Reappear() {
                   <TableCell className="text-xs text-muted-foreground">{c.answered_count}</TableCell>
                   <TableCell>
                     <Badge variant={c.window_expired ? "destructive" : "warning"}>
-                      {c.detected_remaining_minutes} min
+                      {c.detected_remaining_minutes} min{c.has_pending || c.restarted ? " · time paused" : ""}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button size="sm" variant="outline" onClick={() => setGranting(c)}>
-                      <RotateCcw className="size-3.5" /> Grant Reappear
-                    </Button>
+                    {c.has_pending ? (
+                      <Badge variant="outline">{c.restarted ? "Restarted · waiting to log in" : "Reappear granted"}</Badge>
+                    ) : (
+                      <div className="flex items-center justify-end gap-2">
+                        {c.restarted && <Badge variant="destructive">Stopped by Restart Exam</Badge>}
+                        <Button size="sm" variant="outline" onClick={() => setGranting(c)}>
+                          <RotateCcw className="size-3.5" /> Grant Reappear
+                        </Button>
+                      </div>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

@@ -1,11 +1,13 @@
 import * as React from "react"
 import { Routes, Route, Navigate } from "react-router-dom"
 import { deliverPendingSubmit } from "@/lib/pendingSubmit"
+import { checkDeviceCommand } from "@/lib/deviceCommands"
 import Home from "@/pages/Home"
 import AdminLogin from "@/pages/admin/AdminLogin"
 import Dashboard from "@/pages/admin/Dashboard"
 import LiveExam from "@/pages/admin/LiveExam"
 import StopExam from "@/pages/admin/StopExam"
+import RestartExam from "@/pages/admin/RestartExam"
 import Students from "@/pages/admin/Students"
 import StudentRegistration from "@/pages/student/StudentRegistration"
 import ResultExams from "@/pages/student/ResultExams"
@@ -46,7 +48,9 @@ function App() {
     run()
     const id = setInterval(run, 10000)
     window.addEventListener("online", run)
-    return () => { clearInterval(id); window.removeEventListener("online", run) }
+    // Admin commands for this device (Restart Exam / Restart Device) arrive through a 5-second heartbeat.
+    const beat = setInterval(() => { checkDeviceCommand() }, 5000)
+    return () => { clearInterval(id); clearInterval(beat); window.removeEventListener("online", run) }
   }, [])
   return (
     <Routes>
@@ -69,6 +73,7 @@ function App() {
           <Route path="/admin/generate-hall-tickets" element={<GenerateHallTickets />} />
           <Route path="/admin/attendance" element={<Attendance />} />
           <Route path="/admin/live-monitor" element={<LiveMonitor />} />
+          <Route path="/admin/restart-exam" element={<RestartExam />} />
           <Route path="/admin/analytics" element={<Analytics />} />
           <Route path="/admin/reappear" element={<Reappear />} />
           <Route path="/admin/settings" element={<Settings />} />

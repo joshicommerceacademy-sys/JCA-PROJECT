@@ -242,7 +242,18 @@ export default function Verification({ exam, onExit, operator, slotId, onSelectS
             )}
             {waiting.map((s) => (
               <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                  {/* Candidate photo (and signature) so the desk can check the person in front of them - only when the exam uses them. */}
+                  {exam.show_photo_signature && (
+                    <div className="flex items-center gap-2">
+                      {s.photo_url
+                        ? <img src={s.photo_url} alt={`${s.full_name} photo`} className="h-16 w-auto max-w-14 rounded border object-cover" />
+                        : <div className="flex h-16 w-12 items-center justify-center rounded border text-[10px] text-muted-foreground">No photo</div>}
+                      {s.signature_url
+                        ? <img src={s.signature_url} alt={`${s.full_name} signature`} className="h-10 w-auto max-w-28 rounded border bg-white object-fill" />
+                        : <div className="flex h-10 w-20 items-center justify-center rounded border text-[10px] text-muted-foreground">No signature</div>}
+                    </div>
+                  )}
                   <span className="w-20 font-mono text-xs text-muted-foreground">{s.roll_number || "—"}</span>
                   <span className="font-medium">{s.full_name}</span>
                   {(deskClosed || s.marked_absent) && <Badge variant="destructive">Absent</Badge>}

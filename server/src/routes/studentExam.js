@@ -6,8 +6,19 @@ const { requireStudent } = require("../middleware/auth");
 const { getExamWindow } = require("../utils/examWindow");
 const { shuffle } = require("../utils/shuffle");
 const { buildSubjectBreakdown } = require("../utils/subjectBreakdown");
-const { getSettings } = require("../utils/settings");
 const { mergeAnswers } = require("../utils/attemptSync");
+const { captureIp } = require("../utils/clientIp");
+const { getSeatIndex, blockForSeat } = require("../utils/attemptQuestions");
+const { logAnswers } = require("../utils/answerLog");
+
+// Restart Exam stopped this candidate's exam on the spot; nothing more is accepted until an admin
+// grants Reappear (which clears the stop).
+function assertNotForceStopped(attempt) {
+    if (attempt && attempt.status === "in_progress" && attempt.force_stopped_at) {
+        throw new ApiError(409, "This exam was stopped by the invigilator.", "ATTEMPT_STOPPED");
+    }
+}
+const { getSettings } = require("../utils/settings");
 
 const router = express.Router();
 router.use(requireStudent);
@@ -22,56 +33,74 @@ function withVisibility(row, exam) {
     return hidden;
 }
 
-// One student's personal display order: shuffled independently within each section so
-// section boundaries never move, only the order within each subject does.
-async function buildQuestionOrder(examId) {
+// This candidate's personal question set and order.
+//  - Normal sections: the exam's frozen questions, shuffled within the section.
+//  - A random-drawn section whose bank holds more questions than the exam asks, on an exam with seat
+//    numbers: the candidate gets the block of the bank that belongs to their seat (bank of 200, exam of
+//    50: first seat -> questions 1-50, next seat -> 51-100, ...), shuffled within the block.
+// Section boundaries never move, only the order within each subject does.
+async function buildQuestionOrder(exam, student) {
     const sectionRows = await query(
-        "SELECT id FROM exam_sections WHERE exam_id = $1 ORDER BY ordinal",
-        [examId]
+        "SELECT id, bank_id, question_count, manual_pick FROM exam_sections WHERE exam_id = $1 ORDER BY ordinal",
+        [exam.id]
     );
     const order = [];
     if (sectionRows.length) {
+        const seatIndex = exam.seat_number_required ? await getSeatIndex(student, exam.id) : null;
         for (const section of sectionRows) {
             const qs = await query(
                 "SELECT question_id FROM exam_questions WHERE section_id = $1 ORDER BY ordinal",
                 [section.id]
             );
-            order.push(...shuffle(qs.map((q) => q.question_id)));
+            let ids = qs.map((q) => q.question_id);
+            if (seatIndex !== null && !section.manual_pick && section.question_count > 0) {
+                const pool = await query(
+                    "SELECT id FROM questions WHERE bank_id = $1 AND status = 'published' ORDER BY id",
+                    [section.bank_id]
+                );
+                if (pool.length > section.question_count) {
+                    ids = blockForSeat(pool.map((q) => q.id), section.question_count, seatIndex);
+                }
+            }
+            order.push(...shuffle(ids));
         }
     } else {
         // Legacy exam scheduled before subject sections existed.
         const qs = await query(
             "SELECT question_id FROM exam_questions WHERE exam_id = $1 ORDER BY ordinal",
-            [examId]
+            [exam.id]
         );
         order.push(...shuffle(qs.map((q) => q.question_id)));
     }
     return order;
 }
 
-// Groups the exam's questions into { id, label, questions } sections, ordered per this
-// student's personal question_order within each section (and by exam_sections.ordinal
-// across sections).
+// Groups this candidate's questions into { id, label, questions } sections, in their personal order
+// within each section (and by exam_sections.ordinal across sections). A question belongs to the section
+// of the exam's frozen set it came from, or - for a seat-wise block - the section built from its bank.
 async function buildSectionedQuestions(examId, questionOrder) {
     const questionRows = await query(
-        `SELECT eq.section_id, q.id, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.marks
-         FROM exam_questions eq JOIN questions q ON q.id = eq.question_id
-         WHERE eq.exam_id = $1`,
-        [examId]
+        `SELECT q.id, q.bank_id, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.marks
+         FROM questions q WHERE q.id = ANY($1::int[])`,
+        [questionOrder]
     );
     const questionById = new Map(questionRows.map((q) => [q.id, q]));
+    const frozen = await query("SELECT question_id, section_id FROM exam_questions WHERE exam_id = $1", [examId]);
+    const frozenSection = new Map(frozen.map((r) => [r.question_id, r.section_id]));
 
     const sectionRows = await query(
-        "SELECT id, subject_label FROM exam_sections WHERE exam_id = $1 ORDER BY ordinal",
+        "SELECT id, bank_id, subject_label FROM exam_sections WHERE exam_id = $1 ORDER BY ordinal",
         [examId]
     );
     const sectionLabelById = new Map(sectionRows.map((s) => [s.id, s.subject_label]));
+    const sectionByBank = new Map();
+    for (const s of sectionRows) if (!sectionByBank.has(s.bank_id)) sectionByBank.set(s.bank_id, s.id);
 
     const sectionsMap = new Map(); // sectionId (or 0 for legacy/no-section) -> { id, label, questions }
     for (const questionId of questionOrder) {
         const q = questionById.get(questionId);
         if (!q) continue; // defensive: question removed after the attempt started
-        const sectionId = q.section_id || 0;
+        const sectionId = frozenSection.get(q.id) || sectionByBank.get(q.bank_id) || 0;
         if (!sectionsMap.has(sectionId)) {
             sectionsMap.set(sectionId, {
                 id: sectionId,
@@ -199,6 +228,7 @@ router.post(
         if (exam.stopped_at) {
             throw new ApiError(403, "This exam has been stopped by the administrator.");
         }
+        assertNotForceStopped(attempt);
 
         if (!attempt) {
             const { start, examEnd, graceEnd } = getExamWindow(exam);
@@ -240,7 +270,7 @@ router.post(
         }
 
         if (!attempt.question_order) {
-            const order = await buildQuestionOrder(exam.id);
+            const order = await buildQuestionOrder(exam, student);
             await query("UPDATE exam_attempts SET question_order = $1 WHERE id = $2", [order, attempt.id]);
             attempt.question_order = order;
         }
@@ -250,8 +280,12 @@ router.post(
         // real client address via X-Forwarded-For (app.set("trust proxy", true) in index.js);
         // the IPv4-mapped IPv6 prefix is stripped so admins see a plain address.
         const settings = await getSettings();
-        const clientIp = String(req.ip || "").replace(/^::ffff:/, "") || null;
-        await query("UPDATE exam_attempts SET ip_address = $1 WHERE id = $2", [clientIp, attempt.id]);
+        await captureIp(req, student.id, attempt.id);
+        await query("UPDATE exam_attempts SET last_seen_at = now() WHERE id = $1", [attempt.id]);
+        const [seatRow] = await query(
+            "SELECT seat_number FROM hall_tickets WHERE student_id = $1 AND exam_id = $2 ORDER BY id DESC LIMIT 1",
+            [student.id, exam.id]
+        );
 
         const sections = await buildSectionedQuestions(exam.id, attempt.question_order);
 
@@ -266,9 +300,10 @@ router.post(
                 attemptId: attempt.id,
                 startedAt: attempt.started_at,
                 endsAt: attempt.ends_at,
-                exam: { id: exam.id, name: exam.name, durationMinutes: exam.duration_minutes, logoUrl: exam.logo_url, showPhotoSignature: !!exam.show_photo_signature, submitButtonAfterMinutes: Number(exam.submit_button_after_minutes || 0) },
+                exam: { id: exam.id, name: exam.name, seatingEnabled: !!exam.seat_number_required, durationMinutes: exam.duration_minutes, logoUrl: exam.logo_url, showPhotoSignature: !!exam.show_photo_signature, submitButtonAfterMinutes: Number(exam.submit_button_after_minutes || 0) },
                 student: {
                     rollNumber: student.roll_number,
+                    seatNumber: exam.seat_number_required ? seatRow?.seat_number || null : null,
                     fullName: student.full_name,
                     photoUrl: student.photo_url,
                     signatureUrl: student.signature_url || null,
@@ -299,9 +334,16 @@ router.put(
             [req.student.id]
         );
         if (!attempt) throw new ApiError(409, "This exam has ended.", "ATTEMPT_CLOSED");
+        assertNotForceStopped(attempt);
         if (new Date() >= new Date(attempt.ends_at)) {
             throw new ApiError(403, "Time is up for this exam.");
         }
+
+        const [before] = await query(
+            "SELECT selected_option FROM exam_attempt_answers WHERE attempt_id = $1 AND question_id = $2",
+            [attempt.id, questionId]
+        );
+        await logAnswers(attempt, [{ questionId: Number(questionId), option: selectedOption, previous: before?.selected_option }]);
 
         await query(
             `INSERT INTO exam_attempt_answers (attempt_id, question_id, selected_option, answered_at)
@@ -312,6 +354,23 @@ router.put(
         );
 
         res.json({ status: "success" });
+    })
+);
+
+// Heartbeat (every few seconds while a candidate is signed in): records "last activity" and the
+// device address, and hands back a pending admin command for this device:
+//   restart         - the exam was stopped on the spot from Live Monitor > Restart Exam
+//   device_restart  - Settings > Device Restart: also wipe the exam data held on the device
+router.get(
+    "/heartbeat",
+    asyncHandler(async (req, res) => {
+        await captureIp(req, req.student.id);
+        await query(
+            "UPDATE exam_attempts SET last_seen_at = now() WHERE student_id = $1 AND status = 'in_progress'",
+            [req.student.id]
+        );
+        const [row] = await query("SELECT pending_command, exam_id FROM students WHERE id = $1", [req.student.id]);
+        res.json({ status: "success", data: { command: row?.pending_command || null, examId: row?.exam_id || null } });
     })
 );
 
@@ -329,6 +388,7 @@ router.put(
         if (!attempt || attempt.status !== "in_progress") {
             throw new ApiError(409, "This exam has ended.", "ATTEMPT_CLOSED");
         }
+        assertNotForceStopped(attempt);
         const [exam] = await query("SELECT * FROM exams WHERE id = $1", [attempt.exam_id]);
         const stored = await mergeAnswers(attempt, exam, req.body.answers);
         res.json({ status: "success", data: { stored } });
@@ -356,6 +416,7 @@ router.post(
         if (attempt.status === "submitted") {
             return res.json({ status: "success", data: withVisibility(attempt, exam) });
         }
+        assertNotForceStopped(attempt);
 
         // Every answer the device holds locally goes in with the submit, so nothing recorded
         // while offline is lost.

@@ -110,6 +110,9 @@ export const adminApi = {
     update: (id: number, body: Record<string, unknown>) => unwrap<Exam>(api.put(`/admin/exams/${id}`, body)),
     updateStatus: (id: number, status: string) => unwrap<Exam>(api.put(`/admin/exams/${id}/status`, { status })),
     remove: (id: number) => api.delete(`/admin/exams/${id}`),
+    // Built on the fly for this download only; nothing is stored. Available after the batch is stopped.
+    downloadActivityLog: (id: number) =>
+      api.get(`/admin/exams/${id}/activity-log-pdf`, { responseType: "blob" }),
     downloadAttendanceSheet: (id: number) =>
       api.get(`/admin/exams/${id}/attendance-sheet`, { responseType: "blob" }),
     start: (id: number) => unwrap<Exam>(api.put(`/admin/exams/${id}/start`)),
@@ -149,6 +152,18 @@ export const adminApi = {
 
   monitor: {
     get: (examId: string) => unwrap<MonitorData>(api.get("/admin/monitor", { params: { examId } })),
+    restart: (studentId: number) => api.post("/admin/monitor/restart", { studentId }),
+    deskReport: () =>
+      unwrap<{
+        exams: {
+          examId: number; name: string; examDate: string; startTime: string; stopped: boolean
+          status: "logged_in" | "active" | "inactive"
+          logins: { userId: string; centreName: string | null; status: "logged_in" | "active" | "inactive"; lastLoginAt: string | null; lastSeenAt: string | null }[]
+        }[]
+      }>(api.get("/admin/monitor/desk-report")),
+    // Verification Desk report of one exam, as a PDF (built on the fly).
+    deskReportPdf: (examId: number) =>
+      api.get("/admin/monitor/desk-report-pdf", { params: { examId }, responseType: "blob" }),
   },
 
   analytics: {
@@ -197,6 +212,8 @@ export const adminApi = {
           | "student_login_enabled"
           | "max_security_warnings"
           | "disable_copy_enabled"
+          | "registration_link_enabled"
+          | "result_link_enabled"
         >
       >
     ) =>
@@ -208,8 +225,17 @@ export const adminApi = {
           studentLoginEnabled: body.student_login_enabled,
           maxSecurityWarnings: body.max_security_warnings,
           disableCopyEnabled: body.disable_copy_enabled,
+          registrationLinkEnabled: body.registration_link_enabled,
+          resultLinkEnabled: body.result_link_enabled,
         })
       ),
+    deviceExams: () => unwrap<{ key: string; name: string; id: number; batches: number }[]>(api.get("/admin/settings/devices/exams")),
+    devices: (examId: number) =>
+      unwrap<{
+        examName: string
+        candidates: { id: number; roll_number: string; full_name: string; last_ip: string | null; last_ip_at: string | null; pending_command: string | null; attempt_status: string | null; last_seen_at: string | null }[]
+      }>(api.get("/admin/settings/devices", { params: { examId } })),
+    restartDevice: (studentId: number) => api.post(`/admin/settings/devices/${studentId}/restart`),
     changePassword: (body: { currentPassword: string; newPassword: string; confirmNewPassword: string }) =>
       api.put("/admin/settings/password", body),
   },

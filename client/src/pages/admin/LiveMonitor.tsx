@@ -1,6 +1,7 @@
 import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { useNavigate } from "react-router-dom"
 import {
   Users, PlayCircle, CheckCircle2, Flag, Radio, Search, ArrowUp, ArrowDown, ArrowUpDown, OctagonAlert, RotateCcw,
 } from "lucide-react"
@@ -41,6 +42,8 @@ function statusOf(c: MonitorCandidate, now: number) {
   if (c.attempt_status === "submitted") return "submitted" as const
   if (c.attempt_status === "in_progress") {
     if (c.ends_at && new Date(c.ends_at).getTime() <= now) return "stopped" as const
+    // Restarted from Restart Exam (stopped on the spot) or Reappear granted but not yet back in.
+    if (c.force_stopped_at || c.has_reappear) return "stopped" as const
     return "in_progress" as const
   }
   return "not_started" as const
@@ -85,6 +88,7 @@ export default function LiveMonitor() {
     queryFn: () => adminApi.settings.get(),
   })
   const showIpColumn = !!settings?.ip_capture_enabled
+  const navigate = useNavigate()
   const [examId, setExamId] = React.useState<string>("")
   const [now, setNow] = React.useState(() => Date.now())
   const [search, setSearch] = React.useState("")
@@ -266,6 +270,9 @@ export default function LiveMonitor() {
             Candidates{notStarted > 0 ? ` · ${notStarted} not started yet` : ""}
           </CardTitle>
           <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="destructive" className="h-8" onClick={() => navigate(`/admin/restart-exam?examId=${examId}`)}>
+              <RotateCcw className="size-3.5" /> Restart Exam
+            </Button>
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -341,7 +348,10 @@ export default function LiveMonitor() {
                     <TableCell className="font-mono text-xs">
                       {status === "in_progress" && remainingMs !== null
                         ? formatDuration(remainingMs)
-                        : status === "stopped"
+                        : status === "stopped" && (c.force_stopped_at || c.has_reappear)
+                          // Restarted: the clock is paused at the time that was left.
+                          ? <span className="text-amber-600">{c.frozen_minutes ?? c.reappear_minutes ?? "—"} min · paused</span>
+                          : status === "stopped"
                           ? <span className="text-destructive">needs reappear</span>
                           : "—"}
                     </TableCell>

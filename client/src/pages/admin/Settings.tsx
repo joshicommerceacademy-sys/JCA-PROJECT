@@ -1,7 +1,7 @@
 import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Settings as SettingsIcon, Hash, Mail, KeyRound, Ban } from "lucide-react"
+import { Settings as SettingsIcon, Hash, Mail, KeyRound, Ban, Link2, Smartphone, ArrowLeft, RotateCw } from "lucide-react"
 import { adminApi } from "@/api/adminApi"
 import { getErrorMessage } from "@/api/client"
 import type { AppSettings } from "@/api/types"
@@ -10,6 +10,107 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+
+// Settings > Device Restart. Exam names first; opening one lists only that exam's candidates with the
+// IP address captured from their device. Restart Device is enabled only once an address was captured.
+function DeviceRestart() {
+  const [exam, setExam] = React.useState<{ id: number; name: string } | null>(null)
+  const [target, setTarget] = React.useState<{ id: number; full_name: string; roll_number: string; last_ip: string | null } | null>(null)
+  const queryClient = useQueryClient()
+  const { data: exams } = useQuery({ queryKey: ["device-exams"], queryFn: () => adminApi.settings.deviceExams() })
+  const { data: devices, isLoading } = useQuery({
+    queryKey: ["devices", exam?.id],
+    queryFn: () => adminApi.settings.devices(exam!.id),
+    enabled: !!exam,
+    refetchInterval: 10000,
+  })
+  const restart = useMutation({
+    mutationFn: (id: number) => adminApi.settings.restartDevice(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["devices", exam?.id] })
+      toast.success("Restart sent to the device")
+      setTarget(null)
+    },
+    onError: (error) => { toast.error(getErrorMessage(error)); setTarget(null) },
+  })
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base"><Smartphone className="size-4" /> Device Restart</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {!exam ? (
+          <>
+            <p className="text-xs text-muted-foreground">Open an exam to see its candidates and the IP address of the device they are using.</p>
+            {(exams || []).length === 0 && <p className="text-sm text-muted-foreground">No exams scheduled.</p>}
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(exams || []).map((e) => (
+                <button key={e.key} type="button" onClick={() => setExam({ id: e.id, name: e.name })} className="rounded-lg border p-3 text-left text-sm font-medium transition-colors hover:bg-muted/50">
+                  {e.name}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-medium">{exam.name}</p>
+              <Button size="sm" variant="outline" onClick={() => setExam(null)}><ArrowLeft className="size-3.5" /> All exams</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Candidate Name</TableHead>
+                    <TableHead>Roll No</TableHead>
+                    <TableHead>IP Address</TableHead>
+                    <TableHead className="text-right">Restart Device</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Loading...</TableCell></TableRow>}
+                  {!isLoading && (devices?.candidates || []).length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">No candidates for this exam.</TableCell></TableRow>}
+                  {(devices?.candidates || []).map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="font-medium">{c.full_name}</TableCell>
+                      <TableCell className="font-mono">{c.roll_number}</TableCell>
+                      <TableCell className="font-mono text-sm">{c.last_ip || <span className="text-muted-foreground">Not captured</span>}</TableCell>
+                      <TableCell className="text-right">
+                        {c.pending_command === "device_restart"
+                          ? <Badge variant="warning">Restart sent</Badge>
+                          : <Button size="sm" variant="outline" disabled={!c.last_ip} onClick={() => setTarget(c)}><RotateCw className="size-3.5" /> Restart Device</Button>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        )}
+      </CardContent>
+
+      <Dialog open={!!target} onOpenChange={(o) => !o && setTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Restart device of {target?.full_name}?</DialogTitle>
+            <DialogDescription>
+              {target?.roll_number} · {target?.last_ip}. The page on that device (mobile or computer) restarts and the exam data stored on it is deleted.
+              A running exam is stopped (clock paused); grant Reappear from the Reappear page when the candidate may continue.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTarget(null)}>Cancel</Button>
+            <Button disabled={restart.isPending} onClick={() => target && restart.mutate(target.id)}>{restart.isPending ? "Sending..." : "Restart Device"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  )
+}
 
 function ToggleRow({
   id, checked, disabled, onCheckedChange, title, description,
@@ -92,8 +193,8 @@ export default function Settings() {
             disabled={isLoading || updateMutation.isPending}
             onCheckedChange={(checked) => updateMutation.mutate({ ip_capture_enabled: checked })}
             title="Capture student IP address"
-            description="Records each candidate's IP address when they start or resume an exam, and shows it as a
-              column on the Live Monitor page. Off by default."
+            description="Records each candidate's device IP address when they select their roll number, log in, start
+              or resume an exam (and while the exam runs), and shows it on the Live Monitor and Device Restart pages."
           />
           <ToggleRow
             id="disable-copy-enabled"
@@ -133,6 +234,32 @@ export default function Settings() {
               />
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base"><Link2 className="size-4" /> Public Links</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <ToggleRow
+            id="registration-link-enabled"
+            checked={settings?.registration_link_enabled !== false}
+            disabled={isLoading || updateMutation.isPending}
+            onCheckedChange={(checked) => updateMutation.mutate({ registration_link_enabled: checked })}
+            title="Student registration link"
+            description="Turn off to stop exam registration. The registration page then says that exam registration is not
+              going on and to contact Joshi Commerce Academy."
+          />
+          <ToggleRow
+            id="result-link-enabled"
+            checked={settings?.result_link_enabled !== false}
+            disabled={isLoading || updateMutation.isPending}
+            onCheckedChange={(checked) => updateMutation.mutate({ result_link_enabled: checked })}
+            title="Result link"
+            description="Turn off to hide the public Results page. It then says that results are not available and to contact
+              Joshi Commerce Academy."
+          />
         </CardContent>
       </Card>
 
@@ -219,6 +346,8 @@ export default function Settings() {
           </form>
         </CardContent>
       </Card>
+
+      <DeviceRestart />
     </div>
   )
 }

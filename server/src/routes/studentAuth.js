@@ -6,6 +6,7 @@ const { asyncHandler, ApiError } = require("../utils/asyncHandler");
 const { canLoginNow, isSelectableForLogin, getExamWindow } = require("../utils/examWindow");
 const { getSettings } = require("../utils/settings");
 const { claimRoll } = require("../utils/rollClaim");
+const { captureIp } = require("../utils/clientIp");
 
 const router = express.Router();
 
@@ -174,6 +175,7 @@ router.post(
         }
 
         const claimedAt = await claimRoll(student, exam, sessionId);
+        await captureIp(req, student.id);
         res.json({ status: "success", data: { rollNumber: student.roll_number, claimedAt } });
     })
 );
@@ -351,7 +353,12 @@ router.post(
             throw new ApiError(401, "Invalid roll number or password.");
         }
 
-        const valid = await bcrypt.compare(password, student.password_hash);
+        // System-generated passwords are all capitals (e.g. ABCD12J): accept them whatever the
+        // candidate's keyboard case is.
+        let valid = await bcrypt.compare(password, student.password_hash);
+        if (!valid && password !== String(password).toUpperCase()) {
+            valid = await bcrypt.compare(String(password).toUpperCase(), student.password_hash);
+        }
         if (!valid) {
             throw new ApiError(401, "Invalid roll number or password.");
         }
@@ -359,8 +366,9 @@ router.post(
         const exam = await loadExamForLogin(student);
         // The roll number must belong to this browser session (claimed on the previous step).
         await claimRoll(student, exam, sessionId);
+        await captureIp(req, student.id);
         const token = await finishLogin(student, exam);
-        await query("UPDATE students SET login_at = now(), updated_at = now() WHERE id = $1", [student.id]);
+        await query("UPDATE students SET login_at = now(), pending_command = NULL, pending_command_at = NULL, updated_at = now() WHERE id = $1", [student.id]);
 
         res.json({
             status: "success",

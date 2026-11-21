@@ -3,6 +3,7 @@ const { query } = require("../db/pool");
 const { sendMail, sendMailBatch } = require("../utils/mailer");
 const { buildHallTicketPdf } = require("../utils/hallTicketPdf");
 const { studentLoginLink } = require("../utils/links");
+const { fmtDate } = require("../utils/dateFormat");
 
 function cityLine(row) {
     return row.centre_city ? `${row.centre_city}, ${row.centre_address}` : (row.centre_address || "—");
@@ -15,7 +16,7 @@ function reminderEmailHtml(row) {
         <p>This is a reminder that your exam is coming up in 5 days:</p>
         <ul>
             <li><strong>Exam:</strong> ${row.exam_name}</li>
-            <li><strong>Date:</strong> ${new Date(row.exam_date).toLocaleDateString()}</li>
+            <li><strong>Date:</strong> ${fmtDate(row.exam_date)}</li>
             <li><strong>Time:</strong> ${row.start_time}</li>
             <li><strong>City:</strong> ${cityLine(row)}</li>
             <li><strong>Hall Ticket No.:</strong> ${row.hall_ticket_number}</li>
@@ -50,7 +51,7 @@ async function runExamReminderJob() {
         const pdfBuffer = await buildHallTicketPdf(row);
         await sendMail({
             to: row.email,
-            subject: `Reminder: ${row.exam_name} on ${new Date(row.exam_date).toLocaleDateString()}`,
+            subject: `Reminder: ${row.exam_name} on ${fmtDate(row.exam_date)}`,
             html: reminderEmailHtml(row),
             attachments: [{ filename: `${row.hall_ticket_number}.pdf`, content: pdfBuffer }],
             type: "exam_reminder",

@@ -38,9 +38,14 @@ router.post(
         if (!exam) throw new ApiError(401, "Invalid user ID or password.");
 
         const token = jwt.sign(
-            { role: "desk", examId: exam.id, registeredExamId: exam.registered_exam_id || null, centreId: login.centreId || null },
+            { role: "desk", userId: login.userId, examId: exam.id, registeredExamId: exam.registered_exam_id || null, centreId: login.centreId || null },
             process.env.JWT_SECRET,
             { expiresIn: "12h" }
+        );
+        await query(
+            `INSERT INTO desk_sessions (exam_id, user_id) VALUES ($1, $2)
+             ON CONFLICT (exam_id, user_id) DO UPDATE SET last_login_at = now(), last_seen_at = now()`,
+            [exam.id, login.userId]
         );
         res.json({
             status: "success",
@@ -52,6 +57,7 @@ router.post(
                     standard_id: exam.standard_id,
                     seat_number_required: exam.seat_number_required,
                     live_photo_capture: exam.live_photo_capture,
+                    show_photo_signature: exam.show_photo_signature,
                     exam_date: exam.exam_date,
                     start_time: exam.start_time,
                     desk_centre: login.centreId ? { id: login.centreId, name: login.centreName, code: login.centreCode } : null,
@@ -90,6 +96,7 @@ router.get(
                 standard_id: exam.standard_id,
                 seat_number_required: exam.seat_number_required,
                 live_photo_capture: exam.live_photo_capture,
+                show_photo_signature: exam.show_photo_signature,
                 desk_closed: isDeskClosed(exam),
                 exam_date: exam.exam_date,
                 start_time: exam.start_time,

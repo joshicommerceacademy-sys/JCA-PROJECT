@@ -52,6 +52,8 @@ export interface Exam {
   negative_marking: boolean
   /** Candidates can look their result up on the public Results page. */
   result_enabled?: boolean
+  password_mode?: "dob" | "system" | "own"
+  own_password?: string | null
   /** ...and download the PDF with all questions and their answers. */
   result_pdf_enabled?: boolean
   submit_button_after_minutes?: number
@@ -248,6 +250,11 @@ export interface MonitorCandidate {
   answered_count: number
   ip_address: string | null
   seat_number?: string | null
+  last_activity_at?: string | null
+  has_reappear?: boolean
+  reappear_minutes?: number | null
+  force_stopped_at?: string | null
+  frozen_minutes?: number | null
 }
 
 export interface MonitorData {
@@ -259,6 +266,9 @@ export interface MonitorData {
     durationMinutes: number
     questionCount: number
     status: string
+    startedAt?: string | null
+    stoppedAt?: string | null
+    firstCandidateStartedAt?: string | null
   }
   candidates: MonitorCandidate[]
   centres?: { name: string; code: string; city: string | null; address: string | null; capacity: number }[]
@@ -337,6 +347,8 @@ export interface AppSettings {
   student_login_enabled: boolean
   max_security_warnings: number
   disable_copy_enabled: boolean
+  registration_link_enabled: boolean
+  result_link_enabled: boolean
   updated_at: string
 }
 
@@ -350,5 +362,7 @@ export interface ReappearEligibleCandidate {
   answered_count: number
   last_activity_at: string | null
   detected_remaining_minutes: number
+  has_pending?: boolean
+  restarted?: boolean
   window_expired: boolean
 }

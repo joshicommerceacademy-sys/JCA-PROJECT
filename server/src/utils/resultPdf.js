@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
 const { loadImageBuffer } = require("./studentFiles");
+const { fmtDateTime } = require("./dateFormat");
 
 function resolvePhotoPath(photoUrl) {
     if (!photoUrl) return null;
@@ -66,7 +67,7 @@ async function buildResultPdf(result, answers = [], options = {}) {
             ["Standard", result.standard_name || "—"],
             ["Centre", result.centre_name || "—"],
             ["Exam", result.exam_name],
-            ...(options.hideTimes ? [] : [["Submitted On", new Date(result.submitted_at).toLocaleString()]]),
+            ...(options.hideTimes ? [] : [["Submitted On", fmtDateTime(result.submitted_at)]]),
         ];
 
         doc.fontSize(11);

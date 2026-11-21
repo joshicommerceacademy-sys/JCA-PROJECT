@@ -1,4 +1,5 @@
 import * as React from "react"
+import { LinkClosed, usePublicLinkStatus } from "@/components/student/LinkClosed"
 import { Link, useNavigate } from "react-router-dom"
 import { ArrowLeft, UserPlus } from "lucide-react"
 import { toast } from "sonner"
@@ -14,6 +15,7 @@ type Centre = { id: number; name: string; city: string | null }
 const emptyForm = { fullName: "", email: "", phone: "", dob: "", gender: "", address: "", centreId: "", registeredExamId: "" }
 
 export default function StudentRegistration() {
+  const linkStatus = usePublicLinkStatus()
   const navigate = useNavigate()
   const [exams, setExams] = React.useState<Exam[]>([])
   const [centres, setCentres] = React.useState<Centre[]>([])
@@ -44,6 +46,10 @@ export default function StudentRegistration() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  if (linkStatus && !linkStatus.registrationEnabled) {
+    return <LinkClosed title="Registration is closed" message={linkStatus.registrationMessage} />
   }
 
   return (

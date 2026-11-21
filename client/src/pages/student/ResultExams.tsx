@@ -1,4 +1,5 @@
 import * as React from "react"
+import { LinkClosed, usePublicLinkStatus } from "@/components/student/LinkClosed"
 import { Link, useNavigate } from "react-router-dom"
 import { ArrowLeft, ClipboardList } from "lucide-react"
 import { api } from "@/api/client"
@@ -9,12 +10,17 @@ import { Skeleton } from "@/components/ui/skeleton"
 type ResultExam = { id: number; name: string }
 
 export default function ResultExams() {
+  const linkStatus = usePublicLinkStatus()
   const navigate = useNavigate()
   const [exams, setExams] = React.useState<ResultExam[] | null>(null)
 
   React.useEffect(() => {
     api.get("/public/result-exams").then((r) => setExams(r.data.data || [])).catch(() => setExams([]))
   }, [])
+
+  if (linkStatus && !linkStatus.resultEnabled) {
+    return <LinkClosed title="Results are not available" message={linkStatus.resultMessage} />
+  }
 
   return (
     <div className="flex min-h-svh items-center justify-center bg-background p-4">

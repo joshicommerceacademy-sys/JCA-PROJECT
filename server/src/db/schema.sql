@@ -523,3 +523,80 @@ CREATE INDEX IF NOT EXISTS idx_exam_attempts_status_ends ON exam_attempts(status
 -- Set by the Verification Desk's "Revoke All" for allowed candidates who never logged in. Shown as
 -- Absent on the Attendance page; cleared when the candidate is allowed again.
 ALTER TABLE students ADD COLUMN IF NOT EXISTS marked_absent BOOLEAN NOT NULL DEFAULT false;
+
+-- ================================================================
+-- 2026-11 update: password mode, device/IP tracking, restart commands, link switches,
+-- verification-desk sessions and an internal event log used only to build the Activity Log PDF.
+-- ================================================================
+
+-- Exam login password: 'dob' (candidate's date of birth), 'system' (generated, e.g. ABCD12J) or 'own' (admin-created).
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS password_mode VARCHAR(10) NOT NULL DEFAULT 'dob';
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS own_password VARCHAR(40);
+-- The system-generated password printed on that candidate's hall ticket.
+ALTER TABLE hall_tickets ADD COLUMN IF NOT EXISTS exam_password VARCHAR(20);
+
+-- Last network address a candidate's device used + a one-shot command for that device
+-- ('restart' = stop the exam on the spot, 'device_restart' = also wipe the exam data on the device).
+-- One-time: switch IP capture on, since the code now records it for every candidate step.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'students' AND column_name = 'last_ip') THEN
+        ALTER TABLE students ADD COLUMN last_ip VARCHAR(64);
+        UPDATE app_settings SET ip_capture_enabled = true;
+    END IF;
+END $$;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS last_ip_at TIMESTAMPTZ;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS pending_command VARCHAR(20);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS pending_command_at TIMESTAMPTZ;
+ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+
+-- Public link switches (Settings > above Access Control).
+ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS registration_link_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS result_link_enabled BOOLEAN NOT NULL DEFAULT true;
+
+-- Verification Desk sign-ins (Reports > Verification Desk shows Active / Inactive from this).
+CREATE TABLE IF NOT EXISTS desk_sessions (
+    exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+    user_id VARCHAR(80) NOT NULL,
+    last_login_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (exam_id, user_id)
+);
+
+-- Things that cannot be rebuilt from other tables (restarts, desk revokes, stops). Never shown in the
+-- app: it only feeds the downloadable Activity Log PDF, which is generated on the fly and not stored.
+CREATE TABLE IF NOT EXISTS exam_event_log (
+    id SERIAL PRIMARY KEY,
+    exam_id INTEGER REFERENCES exams(id) ON DELETE CASCADE,
+    student_id INTEGER REFERENCES students(id) ON DELETE SET NULL,
+    event_type VARCHAR(40) NOT NULL,
+    detail TEXT,
+    ip_address VARCHAR(64),
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_exam_event_log_exam ON exam_event_log(exam_id, occurred_at);
+
+-- Seat-wise question sets. A section drawn at random from a bank (not hand-picked) hands each seat its
+-- own block of the bank when the bank holds more questions than the exam asks (e.g. 200 in the bank,
+-- 50 asked: seat 1 -> questions 1-50, seat 2 -> 51-100, ...). Sections that already exist are hand-picked
+-- (manual_pick = true) so their behaviour does not change.
+ALTER TABLE exam_sections ADD COLUMN IF NOT EXISTS manual_pick BOOLEAN NOT NULL DEFAULT true;
+
+-- Restart Exam only STOPS the candidate's exam: the clock is paused (frozen at this moment) and the
+-- candidate stays locked out until an admin explicitly grants Reappear.
+ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS force_stopped_at TIMESTAMPTZ;
+
+-- Every answer selection / change with its time. Internal: it only feeds the Activity Log PDF.
+CREATE TABLE IF NOT EXISTS exam_answer_log (
+    id SERIAL PRIMARY KEY,
+    exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+    student_id INTEGER REFERENCES students(id) ON DELETE SET NULL,
+    attempt_id INTEGER NOT NULL REFERENCES exam_attempts(id) ON DELETE CASCADE,
+    question_id INTEGER,
+    question_no INTEGER,
+    selected_option CHAR(1) NOT NULL,
+    previous_option CHAR(1),
+    synced BOOLEAN NOT NULL DEFAULT false,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_exam_answer_log_exam ON exam_answer_log(exam_id, occurred_at);

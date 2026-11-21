@@ -2,7 +2,8 @@ const { query } = require("../db/pool");
 const { ApiError } = require("./asyncHandler");
 
 // Seating Arrangement: hands the candidate the next free seat from their centre's labs
-// (lab_seats, configured on the Centres page). A candidate who already holds a seat keeps it.
+// (lab_seats, configured on the Centres page). The seat is picked at random from the free ones, so
+// numbers are not handed out in sequence. A candidate who already holds a seat keeps it.
 async function assignSeat(student, examId) {
     const [ticket] = await query(
         `SELECT ht.id, ht.seat_number, ht.seat_lab_id, l.name AS lab_name
@@ -22,7 +23,7 @@ async function assignSeat(student, examId) {
                SELECT 1 FROM hall_tickets x
                WHERE x.exam_id = $2 AND x.seat_lab_id = l.id AND x.seat_number = s.seat_number AND x.id != $3
            )
-         ORDER BY l.name, length(s.seat_number), s.seat_number
+         ORDER BY random()
          LIMIT 1`,
         [student.centre_id, examId, ticket.id]
     );

@@ -516,16 +516,18 @@ export default function StudentExam() {
       <header className="flex items-center justify-between border-b bg-background px-4 py-2 sm:px-6">
         <div className="flex items-center gap-3">
           {attempt.exam.showPhotoSignature && attempt.student.photoUrl && (
-            <img src={attempt.student.photoUrl} alt="Candidate photo" className="h-12 w-10 rounded border object-cover" />
+            // Box takes the photo's own proportions, so there is no empty white space around it.
+            <img src={attempt.student.photoUrl} alt="Candidate photo" className="h-14 w-auto max-w-16 rounded border object-cover" />
           )}
           <div>
             <p className="text-sm font-semibold leading-tight">{attempt.student.fullName}</p>
             <p className="text-xs font-mono leading-tight">{attempt.student.rollNumber}</p>
           </div>
           {attempt.exam.showPhotoSignature && attempt.student.signatureUrl && (
-            <img src={attempt.student.signatureUrl} alt="Candidate signature" className="h-8 w-20 rounded border bg-white object-contain" />
+            <img src={attempt.student.signatureUrl} alt="Candidate signature" className="h-10 w-auto max-w-32 rounded border bg-white object-fill" />
           )}
         </div>
+        <div className="flex items-center gap-3">
         <div
           className={cn(
             "flex items-center gap-2 rounded-xl border-2 px-4 py-1.5 font-mono text-lg font-bold shadow-sm transition-colors",
@@ -537,6 +539,14 @@ export default function StudentExam() {
           )}
         >
           <Clock className="size-5" /> {formatTime(remaining)}
+        </div>
+        {/* Seat number given at the Verification Desk. With Seating Arrangement off the box shows only the words. */}
+        <div className="flex min-w-24 flex-col items-center justify-center rounded-xl border-2 border-primary/40 bg-primary/5 px-3 py-1 leading-tight">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Seat Number</span>
+          {attempt.exam.seatingEnabled && attempt.student.seatNumber && (
+            <span className="font-mono text-lg font-bold text-primary">{attempt.student.seatNumber}</span>
+          )}
+        </div>
         </div>
         {!isOnline && <WifiOff className="size-5 shrink-0 text-destructive" aria-label="Offline" />}
       </header>

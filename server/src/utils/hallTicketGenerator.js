@@ -1,4 +1,5 @@
 const { query, pool } = require("../db/pool");
+const { resolveExamPassword } = require("./examPassword");
 const { nextHallTicketNumber, nextStudentRollNumber, nextStudentCode, nextSeatNumber } = require("./idGenerators");
 
 // Issues hall tickets (assigning roll number / student code / seat as needed) for the given
@@ -6,6 +7,7 @@ const { nextHallTicketNumber, nextStudentRollNumber, nextStudentCode, nextSeatNu
 async function generateHallTickets({ studentIds, standardId, examId }) {
     const created = [];
     const skipped = [];
+    const [examRow] = await query("SELECT password_mode, own_password FROM exams WHERE id = $1", [examId]);
 
     for (const studentId of studentIds) {
         const [student] = await query("SELECT * FROM students WHERE id = $1", [studentId]);
@@ -64,10 +66,14 @@ async function generateHallTickets({ studentIds, standardId, examId }) {
 
             const hallTicketNumber = await nextHallTicketNumber();
             const seatNumber = null;
+            // Exam login password follows the exam's password mode (DOB / system / own). Only the
+            // system-generated one is kept on the ticket (it is printed there; DOB is derivable).
+            const { hash, plain } = await resolveExamPassword(examRow || {}, student);
+            await client.query("UPDATE students SET password_hash = $1 WHERE id = $2", [hash, studentId]);
             const ticketResult = await client.query(
-                `INSERT INTO hall_tickets (student_id, exam_id, hall_ticket_number, seat_number)
-                 VALUES ($1, $2, $3, $4) RETURNING id`,
-                [studentId, examId, hallTicketNumber, seatNumber]
+                `INSERT INTO hall_tickets (student_id, exam_id, hall_ticket_number, seat_number, exam_password)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+                [studentId, examId, hallTicketNumber, seatNumber, examRow?.password_mode === "system" ? plain : null]
             );
 
             await client.query("COMMIT");

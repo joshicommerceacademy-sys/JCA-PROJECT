@@ -7,6 +7,7 @@ const { assertDeskStudents } = require("../utils/deskScope");
 const { saveStudentUploads } = require("../utils/studentFiles");
 const { assignSeat, releaseSeat } = require("../utils/seats");
 const { releaseRollClaim, grantReappear } = require("../utils/grantReappear");
+const { logExamEvent } = require("../utils/eventLog");
 const { isDeskClosed, isDeskNotOpen, deskWindow } = require("../utils/deskUser");
 const { autoAssignSlots } = require("../utils/slots");
 const { generateHallTickets } = require("../utils/hallTicketGenerator");
@@ -249,6 +250,7 @@ router.put(
                 [s.id]
             );
             await releaseSeat(s.id, exam.id);
+            await logExamEvent({ examId: exam.id, studentId: s.id, type: "revoked_absent", detail: "Revoked at verification desk (did not log in) - marked Absent" });
         }
         res.json({ status: "success", data: { revoked: targets.length } });
     })
@@ -432,6 +434,7 @@ router.put(
             [student.id, reason]
         );
         if (student.exam_id) await releaseSeat(student.id, student.exam_id);
+        await logExamEvent({ examId: student.exam_id, studentId: student.id, type: "desk_disallowed", detail: `Disallowed at verification desk: ${reason}` });
         res.json({ status: "success", message: "Candidate disallowed." });
     })
 );

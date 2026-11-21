@@ -46,9 +46,13 @@ router.get(
         const rows = await query(
             `SELECT st.id, st.roll_number, st.full_name, ea.id AS attempt_id, ea.started_at, ea.ends_at,
                     (SELECT COUNT(*) FROM exam_attempt_answers a WHERE a.attempt_id = ea.id) AS answered_count,
-                    (SELECT MAX(a.answered_at) FROM exam_attempt_answers a WHERE a.attempt_id = ea.id) AS last_activity_at
+                    (SELECT MAX(a.answered_at) FROM exam_attempt_answers a WHERE a.attempt_id = ea.id) AS last_activity_at,
+                    pr.id AS pending_id, pr.remaining_minutes AS pending_minutes, pr.reason AS pending_reason,
+                    ea.force_stopped_at,
+                    CASE WHEN ea.force_stopped_at IS NOT NULL THEN GREATEST(1, CEIL(EXTRACT(EPOCH FROM (ea.ends_at - ea.force_stopped_at)) / 60))::int END AS frozen_minutes
              FROM students st
              JOIN exam_attempts ea ON ea.student_id = st.id AND ea.exam_id = st.exam_id
+             LEFT JOIN reappear_requests pr ON pr.student_id = st.id AND pr.exam_id = st.exam_id AND pr.status = 'pending'
              WHERE st.exam_id = $1 AND st.status = 'allowed' AND ea.status = 'in_progress'
              ORDER BY st.roll_number`,
             [examId]
@@ -59,7 +63,15 @@ router.get(
             const elapsedMinutes = (new Date(stopReference).getTime() - new Date(r.started_at).getTime()) / 60000;
             const detectedRemainingMinutes = Math.max(1, Math.round(exam.duration_minutes - elapsedMinutes));
             const windowExpired = new Date() >= new Date(r.ends_at);
-            return { ...r, detected_remaining_minutes: detectedRemainingMinutes, window_expired: windowExpired };
+            // Stopped with Restart Exam, waiting for the admin's Reappear: the clock is paused.
+            if (r.force_stopped_at && !r.pending_id) {
+                return { ...r, detected_remaining_minutes: r.frozen_minutes, window_expired: false, has_pending: false, restarted: true };
+            }
+            // Reappear already granted: the clock is paused at the time that was left.
+            if (r.pending_id) {
+                return { ...r, detected_remaining_minutes: r.pending_minutes, window_expired: false, has_pending: true, restarted: String(r.pending_reason || "").startsWith("Restart Exam") };
+            }
+            return { ...r, detected_remaining_minutes: detectedRemainingMinutes, window_expired: windowExpired, has_pending: false, restarted: false };
         });
 
         res.json({ status: "success", data: candidates });

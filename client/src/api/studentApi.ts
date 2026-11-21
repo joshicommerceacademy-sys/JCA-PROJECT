@@ -35,8 +35,8 @@ export interface AttemptStart {
   attemptId: number
   startedAt: string
   endsAt: string
-  exam: { id: number; name: string; durationMinutes: number; logoUrl: string | null; showPhotoSignature?: boolean; submitButtonAfterMinutes: number }
-  student: { rollNumber: string; fullName: string; photoUrl: string | null; signatureUrl?: string | null; centreName?: string | null; centreCode?: string | null }
+  exam: { id: number; name: string; durationMinutes: number; logoUrl: string | null; showPhotoSignature?: boolean; seatingEnabled?: boolean; submitButtonAfterMinutes: number }
+  student: { rollNumber: string; fullName: string; photoUrl: string | null; signatureUrl?: string | null; seatNumber?: string | null; centreName?: string | null; centreCode?: string | null }
   sections: AttemptSection[]
   answers: Record<number, "A" | "B" | "C" | "D">
   security: { maxWarnings: number; disableCopyEnabled: boolean }

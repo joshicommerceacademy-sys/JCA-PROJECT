@@ -5,7 +5,7 @@ import HallTickets from "@/pages/admin/HallTickets"
 import Attendance from "@/pages/admin/Attendance"
 import Analytics from "@/pages/admin/Analytics"
 import Results from "@/pages/admin/Results"
-import OperationalReports from "@/pages/admin/OperationalReports"
+import VerificationDeskReport from "@/pages/admin/VerificationDeskReport"
 import CentreCandidateReports from "@/pages/admin/CentreCandidateReports"
 import { Button } from "@/components/ui/button"
 
@@ -15,7 +15,7 @@ const reportTabs = [
   { id: "attendance", label: "Attendance", icon: ClipboardCheck },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "results", label: "Results", icon: Trophy },
-  { id: "operational", label: "Live & Centre Reports", icon: Monitor },
+  { id: "verification", label: "Verification Desk", icon: Monitor },
   { id: "centres", label: "Centre Candidate Summary", icon: Users },
 ] as const
 
@@ -41,7 +41,7 @@ export default function Reports() {
       {tab === "attendance" && <Attendance />}
       {tab === "analytics" && <Analytics />}
       {tab === "results" && <Results />}
-      {tab === "operational" && <OperationalReports />}
+      {tab === "verification" && <VerificationDeskReport />}
       {tab === "centres" && <CentreCandidateReports />}
     </div>
   )

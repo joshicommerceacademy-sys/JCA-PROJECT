@@ -1,4 +1,6 @@
 const { query } = require("../db/pool");
+const { getAttemptQuestionIds } = require("./attemptQuestions");
+const { logAnswers } = require("./answerLog");
 
 // How long after an attempt's deadline the server still waits for a device that lost its
 // connection to report its locally-held answers before it finalises the attempt from whatever
@@ -18,8 +20,7 @@ async function mergeAnswers(attempt, exam, answers) {
     if (attempt.status !== "in_progress" || exam.stopped_at) return 0;
     if (new Date() > syncDeadline(attempt)) return 0;
 
-    const valid = await query("SELECT question_id FROM exam_questions WHERE exam_id = $1", [attempt.exam_id]);
-    const validIds = new Set(valid.map((r) => r.question_id));
+    const validIds = new Set(await getAttemptQuestionIds(attempt));
     const ids = [];
     const options = [];
     for (const [qid, option] of Object.entries(answers)) {
@@ -29,6 +30,13 @@ async function mergeAnswers(attempt, exam, answers) {
         options.push(option);
     }
     if (!ids.length) return 0;
+
+    const before = await query(
+        "SELECT question_id, selected_option FROM exam_attempt_answers WHERE attempt_id = $1 AND question_id = ANY($2::int[])",
+        [attempt.id, ids]
+    );
+    const prev = new Map(before.map((r) => [r.question_id, r.selected_option]));
+    await logAnswers(attempt, ids.map((id, i) => ({ questionId: id, option: options[i], previous: prev.get(id) })), true);
 
     await query(
         `INSERT INTO exam_attempt_answers (attempt_id, question_id, selected_option, answered_at)

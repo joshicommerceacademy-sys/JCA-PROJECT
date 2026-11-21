@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const { fmtDate, fmtDateTime } = require("./dateFormat");
 const { applyPdfBrand, applyWatermark, loadExamLogo } = require("./pdfBrand");
 
 // Same visual pattern as attendanceSheetPdf.js, but filled with the actual attendance data
@@ -19,11 +20,7 @@ function getCols() {
 }
 
 function formatTimestamp(value) {
-    if (!value) return "—";
-    return new Date(value).toLocaleString("en-GB", {
-        day: "2-digit", month: "short", year: "numeric",
-        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true,
-    });
+    return value ? fmtDateTime(value) : "—";
 }
 
 function drawTableHeader(doc, x, y, COLS) {
@@ -65,7 +62,7 @@ async function buildAttendanceReportPdf(exam, rows) {
 
         doc.fontSize(10).font("Helvetica");
         doc.text(`Exam: ${exam.name}`);
-        doc.text(`Scheduled Start: ${new Date(exam.exam_date).toLocaleDateString("en-GB")} at ${exam.start_time}`);
+        doc.text(`Scheduled Start: ${fmtDate(exam.exam_date)} at ${exam.start_time}`);
         doc.font("Helvetica-Bold").text(`Total Candidates: ${rows.length}`);
         doc.font("Helvetica");
         doc.moveDown(0.8);

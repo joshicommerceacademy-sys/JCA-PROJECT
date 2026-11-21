@@ -5,6 +5,7 @@ const QRCode = require("qrcode");
 const { formatDobPassword } = require("./idGenerators");
 const { studentLoginLink } = require("./links");
 const { loadImageBuffer } = require("./studentFiles");
+const { fmtDate } = require("./dateFormat");
 
 const LOGO_PATH = path.join(__dirname, "..", "assets", "jca-logo.png");
 
@@ -34,7 +35,7 @@ function loginSteps(link) {
     return [
         `Go to the student login page: ${link}`,
         "On the \"Select Exam\" screen, choose your exam from the list — the exam password fills in automatically.",
-        "On the next screen, select your Roll Number and enter your password (your date of birth in DDMMYYYY format), then click Login.",
+        "On the next screen, select your Roll Number and enter your exam login password (printed at the bottom of this hall ticket, or given to you by the centre), then click Login.",
         "Wait for the scheduled exam time, read the on-screen instructions, and click Start Exam.",
     ];
 }
@@ -100,7 +101,7 @@ async function buildHallTicketPdf(ticket) {
             ["Roll Number", ticket.roll_number],
             ["Standard", ticket.standard_name || "—"],
             ["Exam", ticket.exam_name],
-            ["Exam Date", new Date(ticket.exam_date).toLocaleDateString()],
+            ["Exam Date", fmtDate(ticket.exam_date)],
             ["Time", `${ticket.start_time.slice(0, 5)} – ${endTime} (${ticket.duration_minutes} min)`],
             ["Centre", ticket.centre_name || "—"],
             ["City", ticket.centre_city ? `${ticket.centre_city}, ${ticket.centre_address}` : (ticket.centre_address || "—")],
@@ -204,6 +205,18 @@ async function buildHallTicketPdf(ticket) {
         doc.moveTo(invigilatorX, signatureY).lineTo(invigilatorX + signatureWidth, signatureY).stroke("#000000");
         doc.fontSize(9).fillColor("#555555").text("Invigilator Signature", invigilatorX, signatureY + 4);
         doc.fillColor("#000000");
+
+        // Exam login password: printed for "system" and "date of birth" modes (not for an admin-created one).
+        const mode = ticket.password_mode || "dob";
+        if (mode === "system" || mode === "dob") {
+            const examPassword = mode === "system" ? ticket.exam_password : formatDobPassword(ticket.dob);
+            if (examPassword) {
+                doc.fontSize(11).font("Helvetica-Bold").fillColor("#000000").text(
+                    `Exam Login Password: ${examPassword}`,
+                    labelX, doc.page.height - 112, { width: doc.page.width - 120, align: "center" }
+                );
+            }
+        }
 
         const footerY = doc.page.height - 90;
         doc.moveTo(60, footerY).lineTo(doc.page.width - 60, footerY).stroke("#cccccc");

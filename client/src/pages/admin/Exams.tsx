@@ -1,7 +1,7 @@
 import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Plus, Trash2, CalendarClock, Download, PlayCircle, Copy, Pencil, Library } from "lucide-react"
+import { Plus, Trash2, CalendarClock, Download, PlayCircle, Copy, Pencil, Library, ScrollText } from "lucide-react"
 import { adminApi } from "@/api/adminApi"
 import { getErrorMessage } from "@/api/client"
 import { formatDate, formatDateTime } from "@/lib/formatDate"
@@ -27,7 +27,7 @@ const emptyForm = {
   name: "", registeredExamId: "", standardId: "", centreId: "", centreIds: [] as string[], examDate: "", startTime: "",
   durationMinutes: "60", passingPercentage: "40", notes: "",
   loginWindowMinutes: "30", gracePeriodMinutes: "25", submitButtonAfterMinutes: "0", showProvisionalResult: true,
-  compensateLateLogin: true, negativeMarking: false, seatNumberRequired: false, showPhotoSignature: false, livePhotoCapture: false, verificationCloseMinutes: "", verificationOpenMinutes: "",
+  compensateLateLogin: true, negativeMarking: false, seatNumberRequired: false, showPhotoSignature: false, livePhotoCapture: false, verificationCloseMinutes: "", verificationOpenMinutes: "", passwordMode: "dob", ownPassword: "",
 }
 
 type SectionForm = { bankId: string; mode: "random" | "manual"; questionCount: string; questionIds: number[] }
@@ -49,7 +49,7 @@ export default function Exams() {
   const [sections, setSections] = React.useState<SectionForm[]>([])
   const [logoFile, setLogoFile] = React.useState<File | null>(null)
   const [editingExam, setEditingExam] = React.useState<any>(null)
-  const [editForm, setEditForm] = React.useState({ name: "", centreIds: [] as string[], examDate: "", startTime: "", durationMinutes: "60", notes: "", seatNumberRequired: false, showPhotoSignature: false, livePhotoCapture: false, verificationCloseMinutes: "", verificationOpenMinutes: "" })
+  const [editForm, setEditForm] = React.useState({ name: "", centreIds: [] as string[], examDate: "", startTime: "", durationMinutes: "60", notes: "", seatNumberRequired: false, showPhotoSignature: false, livePhotoCapture: false, verificationCloseMinutes: "", verificationOpenMinutes: "", passwordMode: "dob", ownPassword: "" })
 
   const sectionsIncomplete = sections.some((s) =>
     !s.bankId || (s.mode === "random" ? !s.questionCount : s.questionIds.length === 0)
@@ -143,6 +143,7 @@ export default function Exams() {
       centreIds: centres?.filter(c => (exam.centre_name || "").split(" / ").includes(c.name)).map(c => String(c.id)) || (exam.centre_id ? [String(exam.centre_id)] : []),
       examDate: String(exam.exam_date || "").slice(0, 10), startTime: String(exam.start_time || "").slice(0, 5),
       durationMinutes: String(exam.duration_minutes || 60), notes: exam.notes || "", seatNumberRequired: !!exam.seat_number_required, showPhotoSignature: !!exam.show_photo_signature, livePhotoCapture: !!exam.live_photo_capture, verificationCloseMinutes: exam.verification_close_minutes === null || exam.verification_close_minutes === undefined ? "" : String(exam.verification_close_minutes), verificationOpenMinutes: exam.verification_open_minutes === null || exam.verification_open_minutes === undefined ? "" : String(exam.verification_open_minutes),
+      passwordMode: exam.password_mode || "dob", ownPassword: exam.own_password || "",
     })
   }
 
@@ -178,6 +179,21 @@ export default function Exams() {
       .sort((x: any, y: any) => `${String(x.exam_date).slice(0, 10)} ${x.start_time}`.localeCompare(`${String(y.exam_date).slice(0, 10)} ${y.start_time}`))
     if (siblings.length > 1) setSheetBatches(siblings)
     else downloadAttendanceSheet(exam.id, exam.name)
+  }
+
+  // Activity Log PDF (after the batch is stopped): generated for this download only, never stored.
+  async function downloadActivityLog(exam: any) {
+    try {
+      const res = await adminApi.exams.downloadActivityLog(exam.id)
+      const url = URL.createObjectURL(res.data as Blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `activity-log-${String(exam.name).replace(/\s+/g, "-")}-${String(exam.start_time).slice(0, 5).replace(":", "")}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      toast.error(await blobMessage(error))
+    }
   }
 
   async function downloadAttendanceSheet(id: number, name: string, batchTime?: string) {
@@ -336,6 +352,11 @@ export default function Exams() {
                     <Button variant="ghost" size="icon" title="Download attendance sheet" onClick={() => openAttendanceSheet(e)}>
                       <Download className="size-4" />
                     </Button>
+                    {e.stopped_at && (
+                      <Button variant="ghost" size="icon" title="Download activity log PDF" onClick={() => downloadActivityLog(e)}>
+                        <ScrollText className="size-4" />
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon" onClick={() => { if (confirm(`Delete exam "${e.name}"?`)) deleteMutation.mutate(e.id) }}>
                       <Trash2 className="size-4 text-destructive" />
                     </Button>
@@ -536,6 +557,7 @@ export default function Exams() {
                 <span className="text-xs text-muted-foreground">The camera opens automatically when a candidate is Allowed at the Verification Desk.</span>
               </Label>
             </div>
+            <PasswordModeField idPrefix="create" mode={form.passwordMode} own={form.ownPassword} onChange={(m, o) => setForm({ ...form, passwordMode: m, ownPassword: o })} />
             <div className="flex flex-col gap-1.5 sm:col-span-2">
               <Label>Open Verification Desk before exam start (minutes)</Label>
               <Input type="number" min={0} max={600} placeholder="Leave empty to open from the start" value={form.verificationOpenMinutes} onChange={(e) => setForm({ ...form, verificationOpenMinutes: e.target.value })} />
@@ -606,12 +628,55 @@ export default function Exams() {
             <div className="grid gap-1"><Label>Close Verification Desk after exam start (minutes)</Label><Input type="number" min="0" max="600" placeholder="Empty = stays open" value={editForm.verificationCloseMinutes} onChange={e => setEditForm({ ...editForm, verificationCloseMinutes: e.target.value })} /></div>
             <div className="flex items-center gap-2"><Switch id="editSeat" checked={editForm.seatNumberRequired} onCheckedChange={(c) => setEditForm({ ...editForm, seatNumberRequired: c })} /><Label htmlFor="editSeat" className="font-normal">Seating Arrangement</Label></div>
             <div className="flex items-center gap-2"><Switch id="editLive" checked={editForm.livePhotoCapture} onCheckedChange={(c) => setEditForm({ ...editForm, livePhotoCapture: c })} /><Label htmlFor="editLive" className="font-normal">Live Photo Capture</Label></div>
+            <PasswordModeField idPrefix="edit" mode={editForm.passwordMode} own={editForm.ownPassword} onChange={(m, o) => setEditForm({ ...editForm, passwordMode: m, ownPassword: o })} />
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-primary" checked={editForm.showPhotoSignature} onChange={e => setEditForm({ ...editForm, showPhotoSignature: e.target.checked })} />Show candidate photo and signature on the exam page</label>
             <div className="grid gap-1"><Label>Notes</Label><Textarea value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} /></div>
             <DialogFooter><Button type="button" variant="outline" onClick={() => setEditingExam(null)}>Cancel</Button><Button type="submit" disabled={editMutation.isPending || !editForm.centreIds.length}>{editMutation.isPending ? "Saving..." : "Save Changes"}</Button></DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+// Reads the message out of a blob-typed error response.
+async function blobMessage(err: unknown): Promise<string> {
+  let msg = getErrorMessage(err)
+  const data = (err as { response?: { data?: Blob } }).response?.data
+  if (data instanceof Blob) {
+    try { msg = JSON.parse(await data.text()).message || msg } catch { /* keep default */ }
+  }
+  return msg
+}
+
+// How candidates log in to this exam: own password (admin types it), system-generated (e.g. ABCD12J) or date of birth.
+function PasswordModeField({
+  mode, own, onChange, idPrefix,
+}: {
+  mode: string
+  own: string
+  onChange: (mode: string, own: string) => void
+  idPrefix: string
+}) {
+  const options = [
+    { value: "dob", title: "Date of birth", hint: "Password = candidate's date of birth (DDMMYYYY). Printed on the hall ticket." },
+    { value: "system", title: "System generated", hint: "A random code in capitals (e.g. ABCD12J) is made for every candidate. Printed on the hall ticket." },
+    { value: "own", title: "Own password", hint: "You choose one password for the whole exam. It is not printed on the hall ticket." },
+  ]
+  return (
+    <div className="flex flex-col gap-2 sm:col-span-2">
+      <Label>Exam login password</Label>
+      <div className="flex flex-col gap-2">
+        {options.map((o) => (
+          <label key={o.value} htmlFor={`${idPrefix}-${o.value}`} className="flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+            <input id={`${idPrefix}-${o.value}`} type="radio" name={`${idPrefix}-pwmode`} className="mt-1 accent-primary" checked={mode === o.value} onChange={() => onChange(o.value, own)} />
+            <span className="flex flex-col"><span className="font-medium">{o.title}</span><span className="text-xs text-muted-foreground">{o.hint}</span></span>
+          </label>
+        ))}
+      </div>
+      {mode === "own" && (
+        <Input placeholder="Type the password for this exam" value={own} onChange={(e) => onChange(mode, e.target.value)} minLength={4} maxLength={40} required />
+      )}
     </div>
   )
 }

@@ -13,19 +13,51 @@ const { buildResultPdf } = require("../utils/resultPdf");
 
 const router = express.Router();
 
+// Settings > "Student registration link" / "Result link". When switched off, the public pages show
+// that the service is not running and the API refuses the request.
+const { getSettings } = require("../utils/settings");
+const REGISTRATION_OFF = "Exam registration is not going on right now. If you have any problem, please contact Joshi Commerce Academy.";
+const RESULT_OFF = "Results are not available right now. If you have any problem, please contact Joshi Commerce Academy.";
+async function requireRegistrationOn(_req, _res, next) {
+    try {
+        const settings = await getSettings();
+        if (settings.registration_link_enabled === false) throw new ApiError(403, REGISTRATION_OFF, "LINK_DISABLED");
+        next();
+    } catch (error) { next(error); }
+}
+async function requireResultOn(_req, _res, next) {
+    try {
+        const settings = await getSettings();
+        if (settings.result_link_enabled === false) throw new ApiError(403, RESULT_OFF, "LINK_DISABLED");
+        next();
+    } catch (error) { next(error); }
+}
+router.get("/link-status", asyncHandler(async (_req, res) => {
+    const settings = await getSettings();
+    res.json({
+        status: "success",
+        data: {
+            registrationEnabled: settings.registration_link_enabled !== false,
+            resultEnabled: settings.result_link_enabled !== false,
+            registrationMessage: REGISTRATION_OFF,
+            resultMessage: RESULT_OFF,
+        },
+    });
+}));
+
 router.get("/centres", asyncHandler(async (_req, res) => {
     const centres = await query("SELECT id, name, city FROM centres WHERE status = 'active' ORDER BY name");
     res.json({ status: "success", data: centres });
 }));
 
 // Exam names an admin has registered - the "Select Exam" list on the student registration page.
-router.get("/exams", asyncHandler(async (_req, res) => {
+router.get("/exams", requireRegistrationOn, asyncHandler(async (_req, res) => {
     const exams = await query("SELECT id, name FROM registered_exams ORDER BY name");
     res.json({ status: "success", data: exams });
 }));
 
 // Exam names (same as the registration form) whose results the admin has enabled.
-router.get("/result-exams", asyncHandler(async (_req, res) => {
+router.get("/result-exams", requireResultOn, asyncHandler(async (_req, res) => {
     const exams = await query(
         `SELECT re.id, re.name, bool_or(e.result_pdf_enabled) AS pdf_enabled
          FROM registered_exams re
@@ -60,7 +92,7 @@ async function findEnabledResult(examId, rollNumber) {
 
 // Result summary shown first: marks obtained, total marks and pass / fail. The PDF is never sent
 // here - the candidate has to ask for it with the Download PDF button (when the admin allowed it).
-router.post("/result", asyncHandler(async (req, res) => {
+router.post("/result", requireResultOn, asyncHandler(async (req, res) => {
     const { examId, rollNumber } = req.body || {};
     const r = await findEnabledResult(examId, rollNumber);
     res.json({
@@ -80,7 +112,7 @@ router.post("/result", asyncHandler(async (req, res) => {
 
 // Candidate result PDF (name, all questions and the answers they selected; no login/submit times).
 // Only served when the admin enabled the result *and* chose to include the PDF.
-router.post("/result-pdf", asyncHandler(async (req, res) => {
+router.post("/result-pdf", requireResultOn, asyncHandler(async (req, res) => {
     const { examId, rollNumber } = req.body || {};
     const result = await findEnabledResult(examId, rollNumber);
     if (!result.result_pdf_enabled) throw new ApiError(403, "The result PDF is not available for this exam.");
@@ -97,7 +129,7 @@ router.post("/result-pdf", asyncHandler(async (req, res) => {
     res.send(pdf);
 }));
 
-router.post("/registration",uploadStudentFiles, asyncHandler(async (req, res) => {
+router.post("/registration", requireRegistrationOn, uploadStudentFiles, asyncHandler(async (req, res) => {
     const { fullName, email, phone, dob, gender, address, centreId, registeredExamId } = req.body;
     if (!fullName || !email || !phone || !dob || !centreId || !registeredExamId) {
         throw new ApiError(400, "Exam, full name, email, phone, date of birth and centre are required.");
